@@ -1,9 +1,9 @@
 @kwdef struct OptimOpts
-    maxiter::Integer = 200
-    reltol::Real = 1e-3
-    s_init::Real = 0.1
-    s_decr::Real = 0.6
-    s_incr::Real = 1.1
+    maxiter::Int = 200
+    reltol::Float64 = 1e-3
+    s_init::Float64 = 0.1
+    s_decr::Float64 = 0.6
+    s_incr::Float64 = 1.1
 end
 
 function topopt(

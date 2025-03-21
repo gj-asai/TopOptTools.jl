@@ -1,6 +1,6 @@
-struct SOMP <: MaterialInterpolation{2}
-    mat::Material
-    penal::Real
+struct SOMP{dim,T<:Real} <: MaterialInterpolation{2,T}
+    mat::Material{dim,T}
+    penal::T
 end
 
 function interpolate(xe::Vector, interp::SOMP)

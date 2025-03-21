@@ -1,17 +1,17 @@
-abstract type MaterialInterpolation{nvar} end
+abstract type MaterialInterpolation{nvar,T<:Real} end
 
-struct FEModel{dim,nvar,interp<:MaterialInterpolation{nvar}}
-    grid::Grid{dim}
-    elemvol::Vector{<:Real}
+struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},CV<:CellValues,FV<:FacetValues}
+    grid::G
+    elemvol::Vector{T}
 
     mat_interp::interp
     constraints::Vector{Dirichlet}
-    loads::Vector{<:Load{dim}}
+    loads::Vector{<:Load{dim,T}}
 
-    cellvalues::CellValues
-    facetvalues::FacetValues
-    dh::DofHandler
-    ch::ConstraintHandler
+    cellvalues::CV
+    facetvalues::FV
+    dh::DofHandler{dim,G}
+    ch::ConstraintHandler{DofHandler{dim,G},T}
     colors::Vector{Vector{Int}}
 end
 
@@ -55,8 +55,8 @@ function FEModel(;
     return FEModel(grid, elemvol, mat_interp, constraints, loads, cellvalues, facetvalues, dh, ch, colors)
 end
 
-get_dim(::FEModel{dim,nvar,mat_interp}) where {dim,nvar,mat_interp} = dim
-get_nvar(::FEModel{dim,nvar,mat_interp}) where {dim,nvar,mat_interp} = nvar
+get_dim(::FEModel{dim}) where {dim} = dim
+get_nvar(::FEModel{dim,nvar}) where {dim,nvar} = nvar
 
 function get_centers(model::FEModel)
     centers = zeros(getncells(model.grid), get_dim(model))

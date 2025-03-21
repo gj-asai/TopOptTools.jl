@@ -1,11 +1,11 @@
-abstract type Load{dim} end
+abstract type Load{dim,T<:Real} end
 
-struct NodalLoad{dim} <: Load{dim}
-    nodeset_name::AbstractString
-    F::NTuple{dim}
+struct NodalLoad{dim,T} <: Load{dim,T}
+    nodeset_name::String
+    F::NTuple{dim,T}
 end
 
-struct LinearLoad{dim} <: Load{dim}
-    faceset_name::AbstractString
-    F::NTuple{dim}
+struct LinearLoad{dim,T} <: Load{dim,T}
+    faceset_name::String
+    F::NTuple{dim,T}
 end

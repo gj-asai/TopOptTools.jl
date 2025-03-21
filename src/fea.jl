@@ -1,4 +1,4 @@
-struct FEResults{T}
+struct FEResults{T<:Real}
     K::SparseMatrixCSC{T}
     f::Vector{T}
     ∂Ke∂x::Vector{Matrix{T}}
@@ -25,6 +25,7 @@ struct ScratchData{CC,CV,T,A}
     cell_cache::CC
     cellvalues::CV
     Ke::Matrix{T}
+    jac::Matrix{T}
     assembler::A
 end
 
@@ -32,8 +33,9 @@ function ScratchData(model::FEModel, K::SparseMatrixCSC)
     cell_cache = CellCache(model.dh)
     n_basefuncs = getnbasefunctions(model.cellvalues)
     Ke = zeros(n_basefuncs, n_basefuncs)
+    jac = zeros(n_basefuncs * n_basefuncs, get_nvar(model))
     asm = start_assemble(K; fillzero=false)
-    return ScratchData(cell_cache, copy(model.cellvalues), Ke, asm)
+    return ScratchData(cell_cache, copy(model.cellvalues), Ke, jac, asm)
 end
 
 function fea!(results::FEResults, x::Vector, model::FEModel)
@@ -57,7 +59,7 @@ function global_stiffness!(K, ∂Ke∂x, x::Vector, model::FEModel)
         @tasks for cellidx in color
             @set scheduler = :static # stick tasks to threads
             @local scratch = ScratchData(model, K)
-            @unpack cell_cache, cellvalues, Ke, assembler = scratch
+            @unpack cell_cache, cellvalues, Ke, jac, assembler = scratch
 
             reinit!(cell_cache, cellidx)
             reinit!(cellvalues, cell_cache)
@@ -65,7 +67,7 @@ function global_stiffness!(K, ∂Ke∂x, x::Vector, model::FEModel)
             e = cellidx
             xe = x[nvar*(e-1)+1:nvar*e]
 
-            jac = ForwardDiff.jacobian((Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model), Ke, xe)
+            ForwardDiff.jacobian!(jac, (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model), Ke, xe)
             for var_idx = 1:nvar
                 @views ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], (n_basefuncs, n_basefuncs))
             end

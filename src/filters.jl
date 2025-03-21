@@ -1,9 +1,9 @@
-struct ConvolutionFilter
-    H::Union{AbstractMatrix,LinearAlgebra.UniformScaling}
+struct ConvolutionFilter{T<:Real}
+    H::Union{SparseMatrixCSC{T},LinearAlgebra.UniformScaling{T}}
 end
 
-function ConvolutionFilter(radius::Real, model::FEModel)
-    radius == 0 && return ConvolutionFilter(I)
+function ConvolutionFilter(radius::Float64, model::FEModel)
+    radius == 0 && return ConvolutionFilter{Float64}(I)
 
     @info "Building convolution filter"
     centers = get_centers(model) |> transpose
@@ -23,7 +23,7 @@ function ConvolutionFilter(radius::Real, model::FEModel)
     H ./= sum(H, dims=2)
     dropzeros!(H)
 
-    return ConvolutionFilter(H)
+    return ConvolutionFilter{Float64}(H)
 end
 
 function filter!(x::AbstractVector, f::ConvolutionFilter)

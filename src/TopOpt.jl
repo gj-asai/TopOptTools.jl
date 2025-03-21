@@ -13,7 +13,7 @@ using Ferrite,
 
 Nonconvex.@load MMA
 
-export Isotropic2D, Orthotropic2D,
+export Isotropic2D, Orthotropic2D, Orthotropic3D,
     SIMP, SOMP, MMSOMP,
     NodalLoad, LinearLoad,
     FEModel, get_centers,

@@ -4,32 +4,32 @@ using JLD2
 
 using TopOpt
 
-function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1234, filename=nothing)
+function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1234, filename=nothing)
     Random.seed!(seed)
 
     # Import mesh
-    grid = togrid("test/models/mbb.msh")
-    addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
-    addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right corner
-    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left corner
+    grid = togrid("test/models/mbb3d.msh")
+    addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left face
+    addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right edge
+    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left edge
 
     # Define materials
-    carbon = Orthotropic2D(El=122.98e3, Et=2.88e3, nult=0.25, Glt=1.23e3, ρ=1.54e-3, CO2=11.29)
-    bamboo = Orthotropic2D(El=10.48e3, Et=2.88e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
+    carbon = Orthotropic3D(El=122.98e3, Et=2.88e3, nult=0.25, Glt=1.23e3, ρ=1.54e-3, CO2=11.29)
+    bamboo = Orthotropic3D(El=10.48e3, Et=2.88e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
     mat_interp = MMSOMP([carbon, bamboo], 1.0)
 
     # FE model
     model = TopOpt.FEModel(
         grid=grid,
-        ip=Lagrange{RefQuadrilateral,1}(), # linear elements
-        qr=QuadratureRule{RefQuadrilateral}(2), # 2 point quadrature
+        ip=Lagrange{RefHexahedron,1}(), # linear elements
+        qr=QuadratureRule{RefHexahedron}(2), # 2 point quadrature
         mat_interp=mat_interp,
         constraints=[
-            Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> 0.0, [1]), # block x displacement
-            Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
+            Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> [0.0, 0.0], [1, 3]), # block x displacement
+            Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> [0.0, 0.0], [2, 3]), # block y displacement
         ],
         loads=[
-            TopOpt.NodalLoad("force", (0.0, -100.0)),
+            TopOpt.NodalLoad("force", (0.0, -100.0, 0.0)),
         ],
     )
     density_filter = ConvolutionFilter(rρ, model)
