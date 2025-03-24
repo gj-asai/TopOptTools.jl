@@ -6,12 +6,10 @@ function ConvolutionFilter(radius::Float64, model::FEModel)
     radius == 0 && return ConvolutionFilter{Float64}(I)
 
     @info "Building convolution filter"
-    centers = get_centers(model) |> transpose
-    tree = BallTree(centers)
-
+    centers = model.centers
     iH, jH = Int[], Int[]
     sH = Float64[]
-    for i in 1:getncells(model.grid), j in inrange(tree, centers[:, i], 1.5 * radius)
+    for i in 1:getncells(model.grid), j in inrange(model.balltree, centers[:, i], 1.5 * radius)
         dist = sqrt(sum((centers[:, i] - centers[:, j]) .^ 2))
         dist > radius && continue
         push!(iH, i)

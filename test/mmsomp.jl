@@ -9,7 +9,6 @@ using TopOpt
 function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=2500, seed=1234, filename=nothing)
     Random.seed!(seed)
     reset_timer!()
-    isfile("$(filename).jld2") && @warn "File $(filename).jld2 already exists, no result will be saved" # TODO: handle this better
 
     # Import mesh
     @timeit "read mesh" begin
@@ -139,53 +138,46 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
     end
 
     # Run optimization
-    Base.atexit(() -> save_optim(filename, history, grid))
     opts = OptimOpts(maxiter=maxiter, reltol=1e-5)
-    x = let x
-        try
-            x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
-        catch e
-            # stop optim and save after receiving a SIGINT
-            e isa InterruptException || e isa TaskFailedException || rethrow()
-            @warn "Computation interrupted"
-            x = history[:x][end]
-        end
-        copy(x)
+    try
+        x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
+
+        # Evaluate final design
+        model.mat_interp.penal = 3.0
+        fea!(results, x, model)
+        history[:final_compliance] = TopOpt.compliance(x, results, model)
+        @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
+    catch e
+        # stop optim and save after receiving a SIGINT
+        e isa InterruptException || e isa TaskFailedException || rethrow()
+        @warn "Computation interrupted"
+        x = history[:x][end]
     end
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 
-    # Evaluate final design and save
-    model.mat_interp.penal = 3.0
-    fea!(results, x, model)
-    history[:final_compliance] = TopOpt.compliance(x, results, model)
-    @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
-    @timeit "export" save_optim(filename, history, grid)
+    # Save
+    !isnothing(filename) && @timeit "export" begin
+        # history
+        save("$(filename).jld2", "history", history)
+        @info "Saved file $(filename).jld2"
+
+        # structure
+        pvd = paraview_collection(filename)
+        for (i, xi) in enumerate(history[:x])
+            filename_i = @sprintf "%s.%4.4d.vtu" filename i
+            VTKGridFile(filename_i, grid) do vtk
+                write_cell_data(vtk, xi[1:3:end], "carbon")
+                write_cell_data(vtk, xi[2:3:end], "bamboo")
+                write_cell_data(vtk, xi[3:3:end], "theta")
+                pvd[i] = vtk
+            end
+            @info "Saved file $(filename_i)"
+        end
+        vtk_save(pvd)
+        @info "Saved file $(filename).pvd"
+    end
 
     echo && print_timer(linechars=:ascii)
 
     nothing
-end
-
-function save_optim(filename, history, grid)
-    isnothing(filename) && return
-    isfile("$(filename).jld2") && return # do not save again if file already exists
-
-    # history
-    save("$(filename).jld2", "history", history)
-    @info "Saved file $(filename).jld2"
-
-    # structure
-    pvd = paraview_collection(filename)
-    for (i, xi) in enumerate(history[:x])
-        filename_i = @sprintf "%s.%4.4d.vtu" filename i
-        VTKGridFile(filename_i, grid) do vtk
-            write_cell_data(vtk, xi[1:3:end], "carbon")
-            write_cell_data(vtk, xi[2:3:end], "bamboo")
-            write_cell_data(vtk, xi[3:3:end], "theta")
-            pvd[i] = vtk
-        end
-        @info "Saved file $(filename_i)"
-    end
-    vtk_save(pvd)
-    @info "Saved file $(filename).pvd"
 end

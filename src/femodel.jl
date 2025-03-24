@@ -1,7 +1,9 @@
 abstract type MaterialInterpolation{nvar,T<:Real} end
 
-struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},CV<:CellValues,FV<:FacetValues}
+struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},BT<:BallTree,CV<:CellValues,FV<:FacetValues}
     grid::G
+    balltree::BT
+    centers::Matrix{T}
     elemvol::Vector{T}
 
     mat_interp::interp
@@ -52,20 +54,18 @@ function FEModel(;
         end
     end
 
-    return FEModel(grid, elemvol, mat_interp, constraints, loads, cellvalues, facetvalues, dh, ch, colors)
+    centers = zeros(dim, getncells(grid))
+    for cell in CellIterator(dh)
+        id = cellid(cell)
+        for node in getcoordinates(grid, id)
+            centers[:, id] += node
+        end
+        centers[:, id] ./= Ferrite.nnodes_per_cell(grid, id)
+    end
+    tree = BallTree(centers)
+
+    return FEModel(grid, tree, centers, elemvol, mat_interp, constraints, loads, cellvalues, facetvalues, dh, ch, colors)
 end
 
 get_dim(::FEModel{dim}) where {dim} = dim
 get_nvar(::FEModel{dim,nvar}) where {dim,nvar} = nvar
-
-function get_centers(model::FEModel)
-    centers = zeros(getncells(model.grid), get_dim(model))
-    for cell in CellIterator(model.dh)
-        id = cellid(cell)
-        for node in getcoordinates(model.grid, id)
-            centers[id, :] += node
-        end
-        centers[id, :] ./= Ferrite.nnodes_per_cell(model.grid, id)
-    end
-    return centers
-end

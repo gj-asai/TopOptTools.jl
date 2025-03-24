@@ -1,6 +1,6 @@
-sizex = 100;
-sizey = 40;
-sizez = 20;
+sizex = 150;
+sizey = 30;
+sizez = 10;
 
 nx = 20;
 ny = 10;
