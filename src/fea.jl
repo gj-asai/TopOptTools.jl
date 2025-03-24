@@ -42,12 +42,12 @@ function fea!(results::FEResults, x::Vector, model::FEModel)
     @unpack K, f, ∂Ke∂x, u = results
 
     # assemble linear system, uses multithreading
-    global_stiffness!(K, ∂Ke∂x, x, model)
+    @timeit timer "assemble" global_stiffness!(K, ∂Ke∂x, x, model)
     apply!(K, model.ch)
 
     # solve linear system, conjugate gradients from Krylov.jl
     # avoiding u .= K\f because it uses OpenBLAS which conflicts with the multithreading when running in the cluster
-    u .= cg(K, f, u)[1]
+    @timeit timer "solve" u .= cg(K, f, u)[1]
 end
 
 function global_stiffness!(K, ∂Ke∂x, x::Vector, model::FEModel)

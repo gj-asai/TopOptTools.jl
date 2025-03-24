@@ -6,6 +6,8 @@
     s_incr::Float64 = 1.1
 end
 
+const timer = TimerOutput()
+
 function topopt(
     objective::Function, dobjective::Function,
     constraint::Function, dconstraint::Function,
@@ -13,6 +15,7 @@ function topopt(
     model::FEModel, opts::OptimOpts,
     post::Function, # TODO: implement a default value that just returns nothing
 )
+    reset_timer!(timer)
     x0 = copy(x0)
 
     mma = Model()
@@ -38,5 +41,6 @@ function topopt(
         ),
         callback=post,
     )
+
     return r.minimizer
 end

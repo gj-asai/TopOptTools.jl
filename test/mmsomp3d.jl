@@ -1,56 +1,67 @@
 using Ferrite, FerriteGmsh
+using TimerOutputs
+using WriteVTK, JLD2
 using Random
-using WriteVTK
+using Printf
 
 using TopOpt
 
-function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1234, filename=nothing)
+function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=500, seed=1234, filename=nothing)
     Random.seed!(seed)
+    reset_timer!()
+    isfile("$(filename).jld2") && @warn "File $(filename).jld2 already exists, no result will be saved" # TODO: handle this better
 
     # Import mesh
-    grid = togrid("test/models/mbb3d.msh")
-    addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left face
-    addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right edge
-    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left edge
-
-    # Define materials
-    carbon = Orthotropic3D(El=122.98e3, Et=2.88e3, nult=0.25, Glt=1.23e3, ρ=1.54e-3, CO2=11.29)
-    bamboo = Orthotropic3D(El=10.48e3, Et=2.88e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
-    mat_interp = MMSOMP([carbon, bamboo], 1.0)
-
-    # FE model
-    model = TopOpt.FEModel(
-        grid=grid,
-        ip=Lagrange{RefHexahedron,1}(), # linear elements
-        qr=QuadratureRule{RefHexahedron}(2), # 2 point quadrature
-        mat_interp=mat_interp,
-        constraints=[
-            Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> [0.0, 0.0], [1, 3]), # block x displacement
-            Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> [0.0, 0.0], [2, 3]), # block y displacement
-        ],
-        loads=[
-            TopOpt.NodalLoad("force", (0.0, -100.0, 0.0)),
-        ],
-    )
-    density_filter = ConvolutionFilter(rρ, model)
-    orientation_filter = ConvolutionFilter(rθ, model)
-
-    results = FEResults(model)
-    nvar = TopOpt.get_nvar(model)
-    nmaterials = nvar - 1
-
-    # Defining initial values
-    x0 = zeros(nvar * getncells(model.grid))
-    xmin = zeros(nvar * getncells(model.grid))
-    xmax = zeros(nvar * getncells(model.grid))
-    for i = 1:nmaterials
-        x0[i:nvar:end] .= fill(volfrac / nmaterials, getncells(model.grid))
-        xmin[i:nvar:end] .= fill(1e-3, getncells(model.grid))
-        xmax[i:nvar:end] .= fill(1, getncells(model.grid))
+    @timeit "read mesh" begin
+        grid = togrid("test/models/mbb3d.msh")
+        addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left face
+        addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right edge
+        addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left edge
     end
-    x0[nmaterials+1:nvar:end] .= π * rand(getncells(model.grid)) .- π / 2
-    xmin[nmaterials+1:nvar:end] .= fill(-π, getncells(model.grid))
-    xmax[nmaterials+1:nvar:end] .= fill(π, getncells(model.grid))
+
+    @timeit "build model" begin
+        # Define materials
+        carbon = Orthotropic3D(El=122.98e3, Et=2.88e3, nult=0.25, Glt=1.23e3, ρ=1.54e-3, CO2=11.29)
+        bamboo = Orthotropic3D(El=10.48e3, Et=2.88e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
+        mat_interp = MMSOMP([carbon, bamboo], 1.0)
+
+        # FE model
+        model = TopOpt.FEModel(
+            grid=grid,
+            ip=Lagrange{RefHexahedron,1}(), # linear elements
+            qr=QuadratureRule{RefHexahedron}(2), # 2 point quadrature
+            mat_interp=mat_interp,
+            constraints=[
+                Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> [0.0, 0.0], [1, 3]), # block x displacement
+                Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> [0.0, 0.0], [2, 3]), # block y displacement
+            ],
+            loads=[
+                TopOpt.NodalLoad("force", (0.0, -100.0, 0.0)),
+            ],
+        )
+
+        results = FEResults(model)
+        nvar = TopOpt.get_nvar(model)
+        nmaterials = nvar - 1
+
+        # Defining initial values
+        x0 = zeros(nvar * getncells(model.grid))
+        xmin = zeros(nvar * getncells(model.grid))
+        xmax = zeros(nvar * getncells(model.grid))
+        for i = 1:nmaterials
+            x0[i:nvar:end] .= fill(volfrac / nmaterials, getncells(model.grid))
+            xmin[i:nvar:end] .= fill(1e-3, getncells(model.grid))
+            xmax[i:nvar:end] .= fill(1, getncells(model.grid))
+        end
+        x0[nmaterials+1:nvar:end] .= π * rand(getncells(model.grid)) .- π / 2
+        xmin[nmaterials+1:nvar:end] .= fill(-π, getncells(model.grid))
+        xmax[nmaterials+1:nvar:end] .= fill(π, getncells(model.grid))
+    end
+
+    @timeit "build filters" begin
+        density_filter = ConvolutionFilter(rρ, model)
+        orientation_filter = ConvolutionFilter(rθ, model)
+    end
 
     # Obtaining normalization factors for the objective function
     @info "Evaluating initial design"
@@ -94,6 +105,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1
         :impact => Float64[],
         :objective => Float64[],
         :constraint => Vector{Float64}[],
+        :final_compliance => 0,
     )
     function post(solution; kwargs...)
         # Filter orientations
@@ -128,18 +140,42 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1
     end
 
     # Run optimization
+    # Base.atexit(() -> save_optim(filename, history, grid))
     opts = OptimOpts(maxiter=maxiter, reltol=1e-5)
-    x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
+    x = let x
+        try
+            x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
+        catch e
+            # stop optim and save after receiving a SIGINT
+            e isa InterruptException || e isa TaskFailedException || rethrow()
+            @warn "Computation interrupted"
+            x = history[:x][end]
+        end
+        copy(x)
+    end
+    merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 
-    # Evaluate final design
+    # Evaluate final design and save
     model.mat_interp.penal = 3.0
     fea!(results, x, model)
-    @info "p = 3 equivalent compliance: $(round(TopOpt.compliance(x, results, model), sigdigits=4))"
+    history[:final_compliance] = TopOpt.compliance(x, results, model)
+    @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
+    @timeit "export" save_optim(filename, history, grid)
 
+    echo && print_timer(linechars=:ascii)
+
+    nothing
+end
+
+function save_optim(filename, history, grid)
     isnothing(filename) && return
+    isfile("$(filename).jld2") && return # do not save again if file already exists
 
-    # Save
-    # TODO: still not saving the objective function history
+    # history
+    save("$(filename).jld2", "history", history)
+    @info "Saved file $(filename).jld2"
+
+    # structure
     pvd = paraview_collection(filename)
     for (i, xi) in enumerate(history[:x])
         filename_i = @sprintf "%s.%4.4d.vtu" filename i
@@ -149,8 +185,8 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1
             write_cell_data(vtk, xi[3:3:end], "theta")
             pvd[i] = vtk
         end
+        @info "Saved file $(filename_i)"
     end
     vtk_save(pvd)
-
-    nothing
+    @info "Saved file $(filename).pvd"
 end

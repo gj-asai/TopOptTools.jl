@@ -9,7 +9,8 @@ using Ferrite,
     NonconvexMMA,
     NearestNeighbors,
     OhMyThreads,
-    UnPack
+    UnPack,
+    TimerOutputs
 
 Nonconvex.@load MMA
 
