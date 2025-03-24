@@ -1,6 +1,6 @@
 using Ferrite, FerriteGmsh
 using Random
-using JLD2
+using WriteVTK
 
 using TopOpt
 
@@ -113,7 +113,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1
         @info "c = $(round(comp, sigdigits=4))\tCO2 = $(round(CO2, sigdigits=4))\t volfracs = $(round.(100*volfracs, digits=2))"
 
         # Push to history
-        push!(history[:x], x)
+        push!(history[:x], copy(x))
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
         push!(history[:objective], solution.f)
@@ -136,8 +136,21 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; maxiter=2500, seed=1
     fea!(results, x, model)
     @info "p = 3 equivalent compliance: $(round(TopOpt.compliance(x, results, model), sigdigits=4))"
 
-    # Save and plot
-    !isnothing(filename) && save(filename, "history", history)
+    isnothing(filename) && return
+
+    # Save
+    # TODO: still not saving the objective function history
+    pvd = paraview_collection(filename)
+    for (i, xi) in enumerate(history[:x])
+        filename_i = @sprintf "%s.%4.4d.vtu" filename i
+        VTKGridFile(filename_i, grid) do vtk
+            write_cell_data(vtk, xi[1:3:end], "carbon")
+            write_cell_data(vtk, xi[2:3:end], "bamboo")
+            write_cell_data(vtk, xi[3:3:end], "theta")
+            pvd[i] = vtk
+        end
+    end
+    vtk_save(pvd)
 
     nothing
 end

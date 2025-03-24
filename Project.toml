@@ -22,6 +22,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Tensors = "48a634ad-e948-5137-8d70-aa71f2a747f4"
 ThreadPinning = "811555cd-349b-4f26-b7bc-1f208b848042"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
+WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
 [compat]
 Ferrite = "1.0.0"
@@ -42,3 +43,4 @@ SparseArrays = "1.11.0"
 Tensors = "1.16.1"
 ThreadPinning = "1.0.2"
 UnPack = "1.0.2"
+WriteVTK = "1.21.1"
