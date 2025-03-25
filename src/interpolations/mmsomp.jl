@@ -1,8 +1,8 @@
-mutable struct MMSOMP{dim,T<:Real,M,N} <: MaterialInterpolation{N,T}
-    mat::Vector{Material{dim,T}}
+mutable struct MMSOMP{dim,T<:Real,M,N,CT} <: MaterialInterpolation{N,T}
+    mat::Vector{Material{dim,T,CT}}
     penal::T
 end
-MMSOMP(mat::Vector{Material{dim,T}}, penal::T) where {dim,T} = MMSOMP{dim,T,length(mat),length(mat) + 1}(mat, penal)
+MMSOMP(mat::Vector{Material{dim,T,CT}}, penal::T) where {dim,T,CT} = MMSOMP{dim,T,length(mat),length(mat) + 1,CT}(mat, penal)
 
 function interpolate(xe::Vector{T}, interp::MMSOMP{dim}) where {T<:Real,dim}
     ρ, θ = xe[1:end-1], xe[end]

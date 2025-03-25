@@ -1,5 +1,5 @@
-struct SIMP{dim,T<:Real} <: MaterialInterpolation{1,T}
-    mat::Material{dim,T}
+struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
+    mat::Material{dim,T,CT}
     penal::T
 end
 

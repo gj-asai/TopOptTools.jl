@@ -1,5 +1,5 @@
-struct SOMP{dim,T<:Real} <: MaterialInterpolation{2,T}
-    mat::Material{dim,T}
+struct SOMP{dim,T<:Real,CT} <: MaterialInterpolation{2,T}
+    mat::Material{dim,T,CT}
     penal::T
 end
 

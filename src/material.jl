@@ -1,5 +1,5 @@
-struct Material{dim,T<:Real}
-    C::SymmetricTensor{4,dim,T}
+struct Material{dim,T<:Real,CT<:SymmetricTensor}
+    C::CT
     ρ::T
     CO2::T
 end
@@ -9,7 +9,7 @@ function Isotropic2D(; E, nu, ρ=0.0, CO2=0.0)
         -nu/E 1/E 0;
         0 0 2(1+nu)/E]
     C = fromvoigt(SymmetricTensor{4,2,Float64}, inv(S))
-    return Material{2,Float64}(C, ρ, CO2)
+    return Material{2,Float64,typeof(C)}(C, ρ, CO2)
 end
 
 function Orthotropic2D(; El, Et, nult, Glt, ρ=0.0, CO2=0.0)
@@ -17,7 +17,7 @@ function Orthotropic2D(; El, Et, nult, Glt, ρ=0.0, CO2=0.0)
         -nult/El 1/Et 0;
         0 0 1/Glt]
     C = fromvoigt(SymmetricTensor{4,2,Float64}, inv(S))
-    return Material{2,Float64}(C, ρ, CO2)
+    return Material{2,Float64,typeof(C)}(C, ρ, CO2)
 end
 
 function Orthotropic3D(; El, Et, nult, Glt, ρ=0.0, CO2=0.0)
@@ -29,5 +29,5 @@ function Orthotropic3D(; El, Et, nult, Glt, ρ=0.0, CO2=0.0)
         0 0 0 0 1/Glt 0;
         0 0 0 0 0 1/Glt]
     C = fromvoigt(SymmetricTensor{4,3,Float64}, inv(S))
-    return Material{3,Float64}(C, ρ, CO2)
+    return Material{3,Float64,typeof(C)}(C, ρ, CO2)
 end
