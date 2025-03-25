@@ -1,5 +1,5 @@
-struct FEResults{T<:Real}
-    K::SparseMatrixCSC{T}
+struct FEResults{T<:Real,MT<:SparseMatrixCSC{T}}
+    K::MT
     f::Vector{T}
     ∂Ke∂x::Vector{Matrix{T}}
     u::Vector{T}
@@ -41,13 +41,19 @@ end
 function fea!(results::FEResults, x::Vector, model::FEModel)
     @unpack K, f, ∂Ke∂x, u = results
 
-    # assemble linear system, uses multithreading
-    @timeit timer "assemble" global_stiffness!(K, ∂Ke∂x, x, model)
-    apply!(K, model.ch)
+    @timeit timer "assemble" begin
+        global_stiffness!(K, ∂Ke∂x, x, model)
+        apply!(K, model.ch)
+    end
 
-    # solve linear system, conjugate gradients from Krylov.jl
-    # avoiding u .= K\f because it uses OpenBLAS which conflicts with the multithreading when running in the cluster
-    @timeit timer "solve" u .= cg(K, f, u)[1]
+    @timeit timer "solve" begin
+        u .= LinearSolve.solve(
+            LinearSolve.LinearProblem(K, f),
+            # UMFPACKFactorization(),
+            # MKLPardisoFactorize(),
+            MKLPardisoIterate(),
+        ).u
+    end
 end
 
 function global_stiffness!(K, ∂Ke∂x, x::Vector, model::FEModel)
@@ -61,8 +67,8 @@ function global_stiffness!(K, ∂Ke∂x, x::Vector, model::FEModel)
             @local scratch = ScratchData(model, K)
             @unpack cell_cache, cellvalues, Ke, jac, assembler = scratch
 
-            reinit!(cell_cache, cellidx)
-            reinit!(cellvalues, cell_cache)
+            Ferrite.reinit!(cell_cache, cellidx)
+            Ferrite.reinit!(cellvalues, cell_cache)
 
             e = cellidx
             xe = x[nvar*(e-1)+1:nvar*e]
@@ -113,7 +119,7 @@ function compute_force_vector(model::FEModel)
     for force in model.loads
         force isa LinearLoad || continue
         for facet in FacetIterator(model.dh, force.faceset_name)
-            reinit!(model.facetvalues, facet)
+            Ferrite.reinit!(model.facetvalues, facet)
             fill!(fe, 0.0)
             for q_point in 1:getnquadpoints(model.facetvalues)
                 dΓ = getdetJdV(model.facetvalues, q_point)

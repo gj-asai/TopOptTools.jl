@@ -48,7 +48,7 @@ function FEModel(;
     # elemental volume vector
     elemvol = zeros(getncells(grid))
     for cell in CellIterator(dh)
-        reinit!(cellvalues, cell)
+        Ferrite.reinit!(cellvalues, cell)
         for q_point in 1:getnquadpoints(cellvalues)
             elemvol[cellid(cell)] += getdetJdV(cellvalues, q_point)
         end

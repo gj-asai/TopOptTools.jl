@@ -1,9 +1,13 @@
-struct ConvolutionFilter{T<:Real}
-    H::Union{SparseMatrixCSC{T},LinearAlgebra.UniformScaling{T}}
+struct ConvolutionFilter{TH<:SparseMatrixCSC}
+    H::TH
 end
 
 function ConvolutionFilter(radius::Float64, model::FEModel)
-    radius == 0 && return ConvolutionFilter{Float64}(I)
+    if radius == 0
+        n = getncells(model.grid)
+        return ConvolutionFilter(sparse(I,n,n))
+    end
+    radius == 0 && return ConvolutionFilter(sparse(I,))
 
     @info "Building convolution filter"
     centers = model.centers
@@ -21,7 +25,7 @@ function ConvolutionFilter(radius::Float64, model::FEModel)
     H ./= sum(H, dims=2)
     dropzeros!(H)
 
-    return ConvolutionFilter{Float64}(H)
+    return ConvolutionFilter(H)
 end
 
 function filter!(x::AbstractVector, f::ConvolutionFilter)
