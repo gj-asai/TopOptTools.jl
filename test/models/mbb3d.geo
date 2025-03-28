@@ -1,10 +1,10 @@
-sizex = 150;
-sizey = 30;
+sizex = 100;
+sizey = 40;
 sizez = 10;
 
-nx = 20;
-ny = 10;
-nz = 3;
+nx = 210;
+ny = 35;
+nz = 10;
 
 Point(1) = {0, 0, 0, 1.0};
 Point(2) = {sizex, 0, 0, 1.0};

@@ -1,8 +1,30 @@
-struct FEResults{T<:Real,MT<:SparseMatrixCSC{T}}
+# task local data for parallel stiffness assemble
+struct ScratchData{CC,CV,T,A}
+    cell_cache::CC
+    cellvalues::CV
+    Ke::Matrix{T}
+    jac::Matrix{T}
+    assembler::A
+end
+
+function ScratchData(model::FEModel, K::SparseMatrixCSC)
+    cell_cache = CellCache(model.dh)
+    cellvalues = copy(model.cellvalues)
+
+    n_basefuncs = getnbasefunctions(cellvalues)
+    Ke = zeros(n_basefuncs, n_basefuncs)
+    jac = zeros(n_basefuncs * n_basefuncs, get_nvar(model))
+
+    asm = start_assemble(K; fillzero=false)
+    return ScratchData(cell_cache, cellvalues, Ke, jac, asm)
+end
+
+struct FEResults{T<:Real,MT<:SparseMatrixCSC{T},SD<:ScratchData}
     K::MT
     f::Vector{T}
     ∂Ke∂x::Vector{Matrix{T}}
     u::Vector{T}
+    chnl::Channel{SD}
 end
 
 function FEResults(model::FEModel)
@@ -17,68 +39,53 @@ function FEResults(model::FEModel)
     # preallocate solution
     u = zeros(get_dim(model) * getnnodes(model.grid))
 
-    return FEResults(K, f, ∂Ke∂x, u)
-end
+    chnl = Channel{ScratchData}(Threads.nthreads())
+    foreach(1:Threads.nthreads()) do _
+        put!(chnl, ScratchData(model, K))
+    end
 
-# task local data for parallel stiffness assemble
-struct ScratchData{CC,CV,T,A}
-    cell_cache::CC
-    cellvalues::CV
-    Ke::Matrix{T}
-    jac::Matrix{T}
-    assembler::A
-end
-
-function ScratchData(model::FEModel, K::SparseMatrixCSC)
-    cell_cache = CellCache(model.dh)
-    n_basefuncs = getnbasefunctions(model.cellvalues)
-    Ke = zeros(n_basefuncs, n_basefuncs)
-    jac = zeros(n_basefuncs * n_basefuncs, get_nvar(model))
-    asm = start_assemble(K; fillzero=false)
-    return ScratchData(cell_cache, copy(model.cellvalues), Ke, jac, asm)
+    return FEResults(K, f, ∂Ke∂x, u, chnl)
 end
 
 function fea!(results::FEResults, x::Vector, model::FEModel)
-    @unpack K, f, ∂Ke∂x, u = results
+    @unpack K, f, u = results
 
     @timeit timer "assemble" begin
-        global_stiffness!(K, ∂Ke∂x, x, model)
+        global_stiffness!(results, x, model)
         apply!(K, model.ch)
     end
 
     @timeit timer "solve" begin
         u .= LinearSolve.solve(
             LinearSolve.LinearProblem(K, f),
-            # UMFPACKFactorization(),
-            # MKLPardisoFactorize(),
-            MKLPardisoIterate(),
+            SparspakFactorization(),
         ).u
     end
 end
 
-function global_stiffness!(K, ∂Ke∂x, x::Vector, model::FEModel)
+function global_stiffness!(results::FEResults, x::Vector, model::FEModel)
+    @unpack K, ∂Ke∂x, chnl = results
+
     n_basefuncs = getnbasefunctions(model.cellvalues)
     nvar = get_nvar(model)
 
     start_assemble(K) # zero K out
     for color in model.colors
-        @tasks for cellidx in color
-            @set scheduler = :static # stick tasks to threads
-            @local scratch = ScratchData(model, K)
+        @tasks for e in color
+            scratch = take!(chnl)
             @unpack cell_cache, cellvalues, Ke, jac, assembler = scratch
 
-            Ferrite.reinit!(cell_cache, cellidx)
+            Ferrite.reinit!(cell_cache, e)
             Ferrite.reinit!(cellvalues, cell_cache)
-
-            e = cellidx
-            xe = x[nvar*(e-1)+1:nvar*e]
+            xe = @view x[nvar*(e-1)+1:nvar*e]
 
             ForwardDiff.jacobian!(jac, (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model), Ke, xe)
             for var_idx = 1:nvar
-                @views ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], (n_basefuncs, n_basefuncs))
+                ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
             end
 
             assemble!(assembler, celldofs(cell_cache), Ke)
+            put!(chnl, scratch)
         end
     end
 end
@@ -97,7 +104,9 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector{T}, cellvalues::Ce
         end
     end
 
-    Ke .= Symmetric(Ke, :L)
+    for i in 1:size(Ke, 1), j in i+1:size(Ke, 1)
+        Ke[i, j] = Ke[j, i]
+    end
 end
 
 function compute_force_vector(model::FEModel)

@@ -4,7 +4,7 @@ mutable struct MMSOMP{dim,T<:Real,M,N,CT} <: MaterialInterpolation{N,T}
 end
 MMSOMP(mat::Vector{Material{dim,T,CT}}, penal::T) where {dim,T,CT} = MMSOMP{dim,T,length(mat),length(mat) + 1,CT}(mat, penal)
 
-function interpolate(xe::Vector{T}, interp::MMSOMP{dim}) where {T<:Real,dim}
+function interpolate(xe::AbstractVector{T}, interp::MMSOMP{dim}) where {T<:Real,dim}
     ρ, θ = xe[1:end-1], xe[end]
     result = zero(SymmetricTensor{4,dim,T})
     for i in eachindex(interp.mat)

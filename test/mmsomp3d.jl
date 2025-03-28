@@ -9,13 +9,14 @@ using TopOpt
 function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=500, seed=1234, filename=nothing)
     Random.seed!(seed)
     reset_timer!()
+    !isnothing(filename) && (pvd = paraview_collection(filename))
 
     # Import mesh
     @timeit "read mesh" begin
         grid = togrid("test/models/mbb3d.msh")
         addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left face
-        addnodeset!(grid, "support", x -> x[1] ≈ 150.0 && x[2] ≈ 0.0) # bottom right edge
-        addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 30.0) # top left edge
+        addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right edge
+        addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left edge
     end
 
     @timeit "build model" begin
@@ -99,7 +100,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
     # - Save current state to history dictionary
     # - Apply continuation
     history = Dict(
-        :x => Vector{Float64}[],
+        :final_x => Float64[],
         :compliance => Float64[],
         :impact => Float64[],
         :objective => Float64[],
@@ -124,11 +125,23 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         @info "c = $(round(comp, sigdigits=4))\tCO2 = $(round(CO2, sigdigits=4))\t volfracs = $(round.(100*volfracs, digits=2))"
 
         # Push to history
-        push!(history[:x], copy(x))
+        history[:final_x] = x
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
         push!(history[:objective], solution.f)
         push!(history[:constraint], solution.g)
+
+        # Save iteration
+        !isnothing(filename) && @timeit "export" begin
+            i = length(history[:compliance]) - 1
+            filename_i = @sprintf "%s.%4.4d.vtu" filename i
+            VTKGridFile(filename_i, grid) do vtk
+                write_cell_data(vtk, @view(x[1:3:end]), "carbon")
+                write_cell_data(vtk, @view(x[2:3:end]), "bamboo")
+                write_cell_data(vtk, @view(x[3:3:end]), "theta")
+                pvd[i] = vtk
+            end
+        end
 
         # Continuation up to p = 5
         Δfrel = abs(solution.f - solution.prevf) / solution.prevf
@@ -152,7 +165,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         # stop optim and save after receiving a SIGINT
         e isa InterruptException || e isa TaskFailedException || rethrow()
         @warn "Computation interrupted"
-        x = history[:x][end]
+        x = history[:final_x]
     end
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 
@@ -162,18 +175,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         save("$(filename).jld2", "history", history)
         @info "Saved file $(filename).jld2"
 
-        # structure
-        pvd = paraview_collection(filename)
-        for (i, xi) in enumerate(history[:x])
-            filename_i = @sprintf "%s.%4.4d.vtu" filename i
-            VTKGridFile(filename_i, grid) do vtk
-                write_cell_data(vtk, xi[1:3:end], "carbon")
-                write_cell_data(vtk, xi[2:3:end], "bamboo")
-                write_cell_data(vtk, xi[3:3:end], "theta")
-                pvd[i] = vtk
-            end
-            @info "Saved file $(filename_i)"
-        end
+        # paraview .pvd
         vtk_save(pvd)
         @info "Saved file $(filename).pvd"
     end
