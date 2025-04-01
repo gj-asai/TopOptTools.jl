@@ -34,7 +34,7 @@ function topopt(
         options=MMAOptions(
             maxiter=opts.maxiter,
             convcriteria=GenericCriteria(),
-            tol=Tolerance(frel=opts.reltol),
+            tol=Tolerance(x=0.0, fabs=0.0, frel=opts.reltol),
             s_init=opts.s_init,
             s_decr=opts.s_decr,
             s_incr=opts.s_incr,
