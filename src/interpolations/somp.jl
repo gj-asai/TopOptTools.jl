@@ -1,4 +1,4 @@
-struct SOMP{dim,T<:Real,CT} <: MaterialInterpolation{2,T}
+mutable struct SOMP{dim,T<:Real,CT} <: MaterialInterpolation{2,T}
     mat::Material{dim,T,CT}
     penal::T
 end
@@ -8,12 +8,12 @@ function interpolate(xe::Vector, interp::SOMP)
     return ρ^interp.penal * rotate(interp.mat.C, θ)
 end
 
-function compliance(_, results::FEResults, ::FEModel{dim,nvar,interp}) where {dim,nvar,interp<:SOMP}
+function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
     @unpack K, u = results
     return u' * K * u
 end
 
-function dcompliance(_, results::FEResults, model::FEModel{dim,nvar,interp}) where {dim,nvar,interp<:SOMP}
+function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
     @unpack u, ∂Ke∂x = results
     dcdx = zeros(length(∂Ke∂x))
     for cell in CellIterator(model.dh)
@@ -26,23 +26,25 @@ function dcompliance(_, results::FEResults, model::FEModel{dim,nvar,interp}) whe
     return dcdx
 end
 
-function impact(x, ::FEResults, model::FEModel{dim,nvar,interp}) where {dim,nvar,interp<:SOMP}
+function impact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
     mat = model.mat_interp.mat
     ρ = @view x[1:2:end]
     return mat.CO2 * mat.ρ * ρ ⋅ model.elemvol
 end
 
-function dimpact(_, ::FEResults, model::FEModel{dim,nvar,interp}) where {dim,nvar,interp<:SOMP}
+function dimpact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
     mat = model.mat_interp.mat
-    return mat.CO2 * mat.ρ * model.elemvol
+    dCO2dx = zero(x)
+    dCO2dx[1:2:end] .= mat.CO2 * mat.ρ * model.elemvol
+    return dCO2dx
 end
 
-function volume(x, ::FEResults, model::FEModel{dim,nvar,interp}) where {dim,nvar,interp<:SOMP}
+function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
     ρ = @view x[1:2:end]
     return ρ ⋅ model.elemvol / sum(model.elemvol)
 end
 
-function dvolume(x, ::FEResults, model::FEModel{dim,nvar,interp}) where {dim,nvar,interp<:SOMP}
+function dvolume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
     ∂g∂x = zero(x)
     ∂g∂x[1:2:end] .= model.elemvol / sum(model.elemvol)
     return ∂g∂x

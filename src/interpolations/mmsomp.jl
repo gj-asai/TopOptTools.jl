@@ -18,6 +18,7 @@ function interpolate(xe::AbstractVector{T}, interp::MMSOMP{dim}) where {T<:Real,
         end
         result += weight * rotate_mmsomp(interp.mat[i], θ)
     end
+    result += void(Val(dim)).C
     return result
 end
 rotate_mmsomp(mat::Material{2}, θ::T) where {T<:Real} = rotate(mat.C, θ)
