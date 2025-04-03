@@ -1,14 +1,13 @@
 using Ferrite, FerriteGmsh
 using TimerOutputs
 using WriteVTK, JLD2
-using Random
 using Printf
 
 using TopOpt
 
-function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=2500, seed=1234, filename=nothing)
-    Random.seed!(seed)
+function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=2500, angle=0, filename=nothing, save_partial=false)
     reset_timer!()
+    !isnothing(filename) && save_partial && (pvd = paraview_collection(filename))
 
     # Import mesh
     @timeit "read mesh" begin
@@ -40,21 +39,22 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         )
 
         results = FEResults(model)
+        num_elem = getncells(model.grid)
         nvar = TopOpt.get_nvar(model)
         nmaterials = nvar - 1
 
         # Defining initial values
-        x0 = zeros(nvar * getncells(model.grid))
-        xmin = zeros(nvar * getncells(model.grid))
-        xmax = zeros(nvar * getncells(model.grid))
+        x0 = zeros(nvar * num_elem)
+        xmin = zeros(nvar * num_elem)
+        xmax = zeros(nvar * num_elem)
         for i = 1:nmaterials
-            x0[i:nvar:end] .= fill(volfrac / nmaterials, getncells(model.grid))
-            xmin[i:nvar:end] .= fill(1e-3, getncells(model.grid))
-            xmax[i:nvar:end] .= fill(1, getncells(model.grid))
+            x0[i:nvar:end] .= fill(volfrac / nmaterials, num_elem)
+            xmin[i:nvar:end] .= fill(1e-3, num_elem)
+            xmax[i:nvar:end] .= fill(1.0, num_elem)
         end
-        x0[nmaterials+1:nvar:end] .= π * rand(getncells(model.grid)) .- π / 2
-        xmin[nmaterials+1:nvar:end] .= fill(-π, getncells(model.grid))
-        xmax[nmaterials+1:nvar:end] .= fill(π, getncells(model.grid))
+        x0[nmaterials+1:nvar:end] .= fill(deg2rad(angle), num_elem)
+        xmin[nmaterials+1:nvar:end] .= fill(-π, num_elem)
+        xmax[nmaterials+1:nvar:end] .= fill(π, num_elem)
     end
 
     @timeit "build filters" begin
@@ -99,11 +99,14 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
     # - Save current state to history dictionary
     # - Apply continuation
     history = Dict(
-        :x => Vector{Float64}[],
+        :final_x => Float64[],
+        :final_u => Float64[],
         :compliance => Float64[],
         :impact => Float64[],
+        :penal => Float64[],
         :objective => Float64[],
         :constraint => Vector{Float64}[],
+        :final_compliance => 0,
     )
     function post(solution; kwargs...)
         # Filter orientations
@@ -123,11 +126,25 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         @info "c = $(round(comp, sigdigits=4))\tCO2 = $(round(CO2, sigdigits=4))\t volfracs = $(round.(100*volfracs, digits=2))"
 
         # Push to history
-        push!(history[:x], copy(x))
+        history[:final_x] = x
+        history[:final_u] = results.u
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
+        push!(history[:penal], mat_interp.penal)
         push!(history[:objective], solution.f)
         push!(history[:constraint], solution.g)
+
+        # Save iteration
+        !isnothing(filename) && save_partial && @timeit "export" begin
+                i = length(history[:compliance]) - 1
+                filename_i = @sprintf "%s.%4.4d.vtu" filename i
+                VTKGridFile(filename_i, grid) do vtk
+                    write_cell_data(vtk, @view(x[1:3:end]), "carbon")
+                    write_cell_data(vtk, @view(x[2:3:end]), "bamboo")
+                    write_cell_data(vtk, @view(x[3:3:end]), "theta")
+                    pvd[i] = vtk
+                end
+            end
 
         # Continuation up to p = 5
         Δfrel = abs(solution.f - solution.prevf) / solution.prevf
@@ -139,7 +156,7 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
 
     # Run optimization
     opts = OptimOpts(maxiter=maxiter, reltol=1e-5)
-    try
+    x = try
         x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
 
         # Evaluate final design
@@ -147,11 +164,11 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         fea!(results, x, model)
         history[:final_compliance] = TopOpt.compliance(x, results, model)
         @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
+        x
     catch e
-        # stop optim and save after receiving a SIGINT
-        e isa InterruptException || e isa TaskFailedException || rethrow()
-        @warn "Computation interrupted"
-        x = history[:x][end]
+        @warn "Computation interrupted - $(typeof(e))"
+        history[:final_compliance] = NaN
+        x = history[:final_x]
     end
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 
@@ -161,23 +178,23 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         save("$(filename).jld2", "history", history)
         @info "Saved file $(filename).jld2"
 
-        # structure
-        pvd = paraview_collection(filename)
-        for (i, xi) in enumerate(history[:x])
-            filename_i = @sprintf "%s.%4.4d.vtu" filename i
-            VTKGridFile(filename_i, grid) do vtk
-                write_cell_data(vtk, xi[1:3:end], "carbon")
-                write_cell_data(vtk, xi[2:3:end], "bamboo")
-                write_cell_data(vtk, xi[3:3:end], "theta")
-                pvd[i] = vtk
-            end
-            @info "Saved file $(filename_i)"
+        # paraview .pvd
+        if save_partial
+            vtk_save(pvd)
+            @info "Saved file $(filename).pvd"
         end
-        vtk_save(pvd)
-        @info "Saved file $(filename).pvd"
+
+        # final result
+        VTKGridFile("$(filename).final.vtu", grid) do vtk
+            write_cell_data(vtk, @view(x[1:3:end]), "carbon")
+            write_cell_data(vtk, @view(x[2:3:end]), "bamboo")
+            write_cell_data(vtk, @view(x[3:3:end]), "theta")
+            write_solution(vtk, model.dh, history[:final_u])
+        end
+        @info "Saved file $(filename).final.vtu"
     end
 
-    echo && print_timer(linechars=:ascii)
+    echo && print_timer(linechars=:ascii, title="w=$(wimpact), angle=$(angle)")
 
-    nothing
+    return history
 end

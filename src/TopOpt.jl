@@ -1,9 +1,9 @@
 module TopOpt
 
+using MKL
 using Ferrite,
     Tensors,
     SparseArrays,
-    MKL,
     Sparspak,
     LinearSolve,
     ForwardDiff,
