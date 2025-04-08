@@ -3,9 +3,14 @@ mutable struct SOMP{dim,T<:Real,CT} <: MaterialInterpolation{2,T}
     penal::T
 end
 
-function interpolate(xe::Vector, interp::SOMP)
+function interpolate(xe::AbstractVector, interp::SOMP)
     ρ, θ = xe
     return ρ^interp.penal * rotate(interp.mat.C, θ)
+end
+
+function rotate_stress(global_stress::SymmetricTensor{2}, xe::AbstractVector, ::SOMP)
+    θ = xe[2]
+    return rotate(global_stress, -θ)
 end
 
 function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}

@@ -144,3 +144,41 @@ function compute_force_vector(model::FEModel)
     return f
 end
 
+function stress(result::FEResults, x::Vector, model::FEModel{dim}) where {dim}
+    @unpack cellvalues, mat_interp, grid, dh = model
+    nvar = get_nvar(model)
+    u = result.u
+
+    qp_global = [
+        [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
+        for _ in 1:getncells(grid)
+    ]
+    qp_material = [
+        [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
+        for _ in 1:getncells(grid)
+    ]
+    qp_vonmises = [
+        [zero(Float64) for _ in 1:getnquadpoints(cellvalues)]
+        for _ in 1:getncells(grid)
+    ]
+
+    for cell in CellIterator(dh)
+        Ferrite.reinit!(cellvalues, cell)
+        e = cellid(cell)
+        cell_global = qp_global[e]
+        cell_material = qp_material[e]
+        cell_vonmises = qp_vonmises[e]
+        for q_point in 1:getnquadpoints(cellvalues)
+            xe = @view x[nvar*(e-1)+1:nvar*e]
+            ε = function_symmetric_gradient(cellvalues, q_point, u, celldofs(cell))
+            σ = interpolate(xe, mat_interp) ⊡ ε
+            s = dev(σ)
+
+            cell_global[q_point] = σ
+            cell_material[q_point] = rotate_stress(σ, xe, mat_interp)
+            cell_vonmises[q_point] = sqrt(1.5 * s ⊡ s)
+        end
+    end
+
+    return qp_global, qp_material, qp_vonmises
+end

@@ -24,6 +24,11 @@ end
 rotate_mmsomp(mat::Material{2}, θ::T) where {T<:Real} = rotate(mat.C, θ)
 rotate_mmsomp(mat::Material{3}, θ::T) where {T<:Real} = rotate(mat.C, Vec{3}((0.,0.,1.)), θ)
 
+function rotate_stress(global_stress::SymmetricTensor{2}, xe::AbstractVector, ::MMSOMP)
+    θ = xe[end]
+    return rotate(global_stress, -θ)
+end
+
 function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
     @unpack K, u = results
     return u' * K * u

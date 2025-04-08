@@ -1,11 +1,15 @@
-struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
+mutable struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
     penal::T
 end
 
-function interpolate(xe::Vector, interp::SIMP)
+function interpolate(xe::AbstractVector, interp::SIMP)
     ρ = xe[1]
     return ρ^interp.penal * interp.mat.C
+end
+
+function rotate_stress(global_stress::SymmetricTensor{2}, ::AbstractVector, ::SIMP)
+    return global_stress 
 end
 
 function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
@@ -23,17 +27,17 @@ function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}
     return dcdx
 end
 
-function impact(x, ::FEResults{T}, model::FEModel{dim,nvar,interp}) where {T,dim,nvar,interp<:SIMP}
+function impact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
     mat = model.mat_interp.mat
     return mat.CO2 * mat.ρ * x ⋅ model.elemvol
 end
 
-function dimpact(_, ::FEResults{T}, model::FEModel{dim,nvar,interp}) where {T,dim,nvar,interp<:SIMP}
+function dimpact(_, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
     mat = model.mat_interp.mat
     return mat.CO2 * mat.ρ * model.elemvol
 end
 
-function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,interp}) where {T,dim,nvar,interp<:SIMP}
+function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
     return x ⋅ model.elemvol / sum(model.elemvol)
 end
 
