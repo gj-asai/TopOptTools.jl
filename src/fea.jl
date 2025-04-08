@@ -161,6 +161,14 @@ function stress(result::FEResults, x::Vector, model::FEModel{dim}) where {dim}
         [zero(Float64) for _ in 1:getnquadpoints(cellvalues)]
         for _ in 1:getncells(grid)
     ]
+    qp_principal = [
+        [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
+        for _ in 1:getncells(grid)
+    ]
+    qp_directions = [
+        [zeros(dim, dim) for _ in 1:getnquadpoints(cellvalues)]
+        for _ in 1:getncells(grid)
+    ]
 
     for cell in CellIterator(dh)
         Ferrite.reinit!(cellvalues, cell)
@@ -168,6 +176,8 @@ function stress(result::FEResults, x::Vector, model::FEModel{dim}) where {dim}
         cell_global = qp_global[e]
         cell_material = qp_material[e]
         cell_vonmises = qp_vonmises[e]
+        cell_principal = qp_principal[e]
+        cell_directions = qp_directions[e]
         for q_point in 1:getnquadpoints(cellvalues)
             xe = @view x[nvar*(e-1)+1:nvar*e]
             ε = function_symmetric_gradient(cellvalues, q_point, u, celldofs(cell))
@@ -177,8 +187,14 @@ function stress(result::FEResults, x::Vector, model::FEModel{dim}) where {dim}
             cell_global[q_point] = σ
             cell_material[q_point] = rotate_stress(σ, xe, mat_interp)
             cell_vonmises[q_point] = sqrt(1.5 * s ⊡ s)
+
+            # sort eigenvalues by absolute value, largest first
+            principal = eigen(σ)
+            principal_order = sortperm(abs.(principal.values), rev=true)
+            cell_principal[q_point] = diagm(SymmetricTensor{2,dim}, principal.values[principal_order])
+            cell_directions[q_point] = principal.vectors[:, principal_order]
         end
     end
 
-    return qp_global, qp_material, qp_vonmises
+    return qp_global, qp_material, qp_vonmises, qp_principal, qp_directions
 end
