@@ -40,7 +40,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
             ],
         )
 
-        results = FEResults(model)
+        results = TopOpt.FEResults(model)
         nvar = TopOpt.get_nvar(model)
         nmaterials = nvar - 1
 

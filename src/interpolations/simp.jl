@@ -21,7 +21,7 @@ function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}
     @unpack u, ∂Ke∂x = results
     dcdx = zeros(length(∂Ke∂x))
     for cell in CellIterator(model.dh)
-        ue = @view u[celldofs(cell)]
+        ue = u[celldofs(cell)]
         dcdx[cellid(cell)] = -ue' * ∂Ke∂x[cellid(cell)] * ue
     end
     return dcdx

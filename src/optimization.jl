@@ -1,9 +1,9 @@
 @kwdef struct OptimOpts
     maxiter::Int = 200
     reltol::Float64 = 1e-3
-    s_init::Float64 = 0.1
-    s_decr::Float64 = 0.6
-    s_incr::Float64 = 1.1
+    s_init::Float64 = 0.2
+    s_decr::Float64 = 0.7
+    s_incr::Float64 = 0.8
 end
 
 const timer = TimerOutput()
