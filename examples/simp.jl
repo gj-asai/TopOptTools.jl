@@ -6,11 +6,14 @@ using Printf
 using TopOpt
 
 function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_partial=false)
+    @info "Starting optimization with volfrac=$volfrac, rρ=$rρ"
     reset_timer!()
     !isnothing(filename) && (pvd = paraview_collection(filename))
 
     # mesh
-    grid = togrid("test/models/mbb.msh")
+    grid = redirect_stdout(devnull) do
+        togrid("examples/models/mbb.msh")
+    end
     addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
     addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right corner
     addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left corner
@@ -78,7 +81,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
         x = solution.x
         comp = compliance(x, results, model)
 
-        history[:final_x] = x
+        history[:final_x] = solution.prevx
         history[:final_u] = results.u
         push!(history[:compliance], comp)
         push!(history[:penal], mat_interp.penal)

@@ -1,19 +1,20 @@
 using Ferrite, FerriteGmsh
 using TimerOutputs
 using WriteVTK, JLD2
-using Random
 using Printf
 
 using TopOpt
 
-function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=500, seed=1234, filename=nothing)
-    Random.seed!(seed)
+function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=500, angle=0, filename=nothing)
+    @info "Starting optimization with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, angle=$angle"
     reset_timer!()
     !isnothing(filename) && (pvd = paraview_collection(filename))
 
     # Import mesh
     @timeit "read mesh" begin
-        grid = togrid("test/models/mbb3d.msh")
+        grid = redirect_stdout(devnull) do
+            togrid("examples/models/mbb3d.msh")
+        end
         addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left face
         addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right edge
         addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left edge
@@ -21,8 +22,8 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
 
     @timeit "build model" begin
         # Define materials
-        carbon = Orthotropic3D(El=122.98e3, Et=2.88e3, nult=0.25, Glt=1.23e3, ρ=1.54e-3, CO2=11.29)
-        bamboo = Orthotropic3D(El=10.48e3, Et=2.88e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
+        carbon = Orthotropic3D(El=122.98e3, Et=10.2e3, nult=0.25, Glt=3.67e3, ρ=1.54e-3, CO2=11.29)
+        bamboo = Orthotropic3D(El=10.48e3, Et=5.26e3, nult=0.39, Glt=1.89e3, ρ=0.98e-3, CO2=1.668)
         mat_interp = MMSOMP([carbon, bamboo], 1.0)
 
         # FE model
@@ -53,7 +54,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
             xmin[i:nvar:end] .= fill(1e-3, getncells(model.grid))
             xmax[i:nvar:end] .= fill(1, getncells(model.grid))
         end
-        x0[nmaterials+1:nvar:end] .= π * rand(getncells(model.grid)) .- π / 2
+        x0[nmaterials+1:nvar:end] .= fill(deg2rad(angle), getncells(model.grid))
         xmin[nmaterials+1:nvar:end] .= fill(-π, getncells(model.grid))
         xmax[nmaterials+1:nvar:end] .= fill(π, getncells(model.grid))
     end
@@ -125,7 +126,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         @info "c = $(round(comp, sigdigits=4))\tCO2 = $(round(CO2, sigdigits=4))\t volfracs = $(round.(100*volfracs, digits=2))"
 
         # Push to history
-        history[:final_x] = x
+        history[:final_x] = solution.prevx
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
         push!(history[:objective], solution.f)

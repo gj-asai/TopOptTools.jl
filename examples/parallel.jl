@@ -24,7 +24,7 @@ mkpath(SCRATCH * "results/")
 const angles = [-90, -75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90]
 const volfrac = 0.4
 const rρ = 4.0
-const rθ = 2.0
+const rθ = 4.0
 
 compliances = Float64[]
 impacts = Float64[]

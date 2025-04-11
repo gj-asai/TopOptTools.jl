@@ -6,12 +6,15 @@ using Printf
 using TopOpt
 
 function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=2500, angle=0, filename=nothing, save_partial=false)
+    @info "Starting optimization with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, w=$wimpact, angle=$angle"
     reset_timer!()
     !isnothing(filename) && save_partial && (pvd = paraview_collection(filename))
 
     # Import mesh
     @timeit "read mesh" begin
-        grid = togrid("test/models/mbb.msh")
+        grid = redirect_stdout(devnull) do
+            togrid("examples/models/mbb.msh")
+        end
         addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
         addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right corner
         addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left corner
@@ -19,15 +22,14 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
 
     @timeit "build model" begin
         # Define materials
-        carbon = Orthotropic2D(El=122.98e3, Et=2.88e3, nult=0.25, Glt=1.23e3, ρ=1.54e-3, CO2=11.29)
-        bamboo = Orthotropic2D(El=10.48e3, Et=2.88e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
-        # bamboo = Orthotropic2D(El=40e3, Et=1e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
+        carbon = Orthotropic2D(El=122.98e3, Et=10.2e3, nult=0.25, Glt=3.67e3, ρ=1.54e-3, CO2=11.29)
+        bamboo = Orthotropic2D(El=10.48e3, Et=5.26e3, nult=0.39, Glt=1.89e3, ρ=0.98e-3, CO2=1.668)
         mat_interp = MMSOMP([carbon, bamboo], 1.0)
 
         # FE model
         ip = Lagrange{RefQuadrilateral,1}() # linear elements
         qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
-        model = TopOpt.FEModel(
+        model = FEModel(
             grid=grid,
             ip=ip,
             qr=qr,
@@ -37,7 +39,7 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
                 Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
             ],
             loads=[
-                TopOpt.NodalLoad("force", (0.0, -100.0)),
+                NodalLoad("force", (0.0, -100.0)),
             ],
         )
 
@@ -75,11 +77,6 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
 
     # Objective function: (1-w).compliance/c_0 + w.impact/CO2_0
     function objective(x)
-        # if length(history[:penal]) > 0 && model.mat_interp.penal != history[:penal][end]
-        #     qp_principaldir = stress(results, x, model)[5]
-        #     cell_principaldir = [mean([atan(dir[2,1], dir[1,1]) for dir in el]) for el in qp_principaldir]
-        #     x[nmaterials+1:nvar:end] = cell_principaldir
-        # end
         @views TopOpt.filter!(x[nmaterials+1:nvar:end], orientation_filter)
         fea!(results, x, model)
 
@@ -131,7 +128,7 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         @info "c = $(round(comp, sigdigits=4))\tCO2 = $(round(CO2, sigdigits=4))\t volfracs = $(round.(100*volfracs, digits=2))"
 
         # Push to history
-        history[:final_x] = x
+        history[:final_x] = solution.prevx
         history[:final_u] = results.u
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
@@ -151,9 +148,9 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
                 end
             end
 
-        # Continuation up to p = 5
+        # Continuation up to p = 3
         Δfrel = abs(solution.f - solution.prevf) / solution.prevf
-        if Δfrel < 5e-4 && Δfrel > opts.reltol && model.mat_interp.penal < 5.0
+        if Δfrel < 5e-4 && Δfrel > opts.reltol && model.mat_interp.penal < 3.0
             model.mat_interp.penal += 1.0
             @info "Updated p to $(model.mat_interp.penal)"
         end

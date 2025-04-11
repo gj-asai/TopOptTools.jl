@@ -7,13 +7,16 @@ using Random
 using TopOpt
 
 function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=nothing, save_partial=false)
+    @info "Starting optimization with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, angle=$angle"
     Random.seed!(1234)
     reset_timer!()
-    !isnothing(filename) && (pvd = paraview_collection(filename))
+    !isnothing(filename) && save_partial && (pvd = paraview_collection(filename))
 
     # Import mesh
     @timeit "read mesh" begin
-        grid = togrid("test/models/mbb.msh")
+        grid = redirect_stdout(devnull) do
+            togrid("examples/models/mbb.msh")
+        end
         addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
         addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right corner
         addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left corner
@@ -21,9 +24,7 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
 
     @timeit "build model" begin
         # Define materials
-        # mat = Orthotropic2D(El=1e3, Et=1e3, nult=0.30, Glt=1e3 / 2.6, ρ=2e-3, CO2=10.0)
-        # mat = Orthotropic2D(El=122.98e3, Et=2.88e3, nult=0.25, Glt=1.23e3, ρ=1.54e-3, CO2=11.29)
-        mat = Orthotropic2D(El=10.48e3, Et=2.88e3, nult=0.39, Glt=0.63e3, ρ=0.98e-3, CO2=1.668)
+        mat = Orthotropic2D(El=10.48e3, Et=5.26e3, nult=0.39, Glt=1.89e3, ρ=0.98e-3, CO2=1.668)
         mat_interp = SOMP(mat, 3.0)
 
         # FE model
@@ -67,12 +68,6 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
     end
 
     function objective(x)
-        # if length(history[:penal]) > 0 && model.mat_interp.penal != history[:penal][end]
-        #     qp_principaldir = stress(results, x, model)[5]
-        #     cell_principaldir = [mean([atan(dir[2, 1], dir[1, 1]) for dir in el]) for el in qp_principaldir]
-        #     TopOpt.filter!(cell_principaldir, large_filter)
-        #     x[2:2:end] = cell_principaldir
-        # end
         @views TopOpt.filter!(x[2:2:end], orientation_filter)
         fea!(results, x, model)
 
@@ -90,7 +85,6 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
     dconstraint(x) = dvolume(x, results, model) / volfrac
 
     # After each iteration:
-    # - Filter orientations
     # - Print current state
     # - Save current state to history dictionary
     # - Apply continuation
@@ -112,7 +106,7 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
         CO2 = impact(x, results, model)
 
         # Push to history
-        history[:final_x] = x
+        history[:final_x] = solution.prevx
         history[:final_u] = results.u
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
