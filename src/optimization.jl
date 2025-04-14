@@ -13,8 +13,14 @@ function topopt(
     constraint::Function, dconstraint::Function,
     x0, xmin, xmax,
     model::FEModel, opts::OptimOpts,
-    post::Function, # TODO: implement a default value that just returns nothing
+    post=nothing,
 )
+    if isnothing(post)
+        post_fn(solution; kwargs...) = nothing
+    else
+        post_fn = post
+    end
+
     reset_timer!(timer)
     x0 = copy(x0)
 
@@ -39,7 +45,7 @@ function topopt(
             s_decr=opts.s_decr,
             s_incr=opts.s_incr,
         ),
-        callback=post,
+        callback=post_fn,
     )
 
     return r.minimizer
