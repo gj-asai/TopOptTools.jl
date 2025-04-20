@@ -35,19 +35,19 @@ function primal_dual_kkt_residuals(problem::MMAProblem{T}) where {T}
     @unpack a0, a, c, d = artificial
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
 
-    g = sum(p ./ (U - x)' + q ./ (x - L)', dims=2) |> vec
+    g = sum(p ./ (U .- x)' + q ./ (x .- L)', dims=2) |> vec
     pλ = p0 + p' * λ
     qλ = q0 + q' * λ
 
     ∂ψ = @. pλ / (U - x)^2 - qλ / (x - L)^2
 
     residuals = T[]
-    append!(residuals, ∂ψ - ξ + η)
-    append!(residuals, c + d .* y - λ - μ)
-    push!(residuals, a0 - ζ - sum(λ .* a))
-    append!(residuals, g - a * z - y + s + r)
-    append!(residuals, ξ .* (x - α) .- ε)
-    append!(residuals, η .* (β - x) .- ε)
+    append!(residuals, ∂ψ .- ξ .+ η)
+    append!(residuals, c .+ d .* y .- λ .- μ)
+    push!(residuals, a0 - ζ - λ ⋅ a)
+    append!(residuals, g .- a .* z .- y .+ s .+ r)
+    append!(residuals, ξ .* (x .- α) .- ε)
+    append!(residuals, η .* (β .- x) .- ε)
     append!(residuals, μ .* y .- ε)
     push!(residuals, ζ * z - ε)
     append!(residuals, λ .* s .- ε)
@@ -61,21 +61,21 @@ function newton_direction(problem::MMAProblem)
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
     @unpack a0, a, c, d = artificial
 
-    g = sum(p ./ (U - x)' + q ./ (x - L)', dims=2) |> vec
+    g = sum(p ./ (U .- x)' + q ./ (x .- L)', dims=2) |> vec
     pλ = p0 + p' * λ
     qλ = q0 + q' * λ
 
     ∂ψ = @. pλ / (U - x)^2 - qλ / (x - L)^2
     Ψ = Diagonal(@. 2 * pλ / (U - x)^3 + 2 * qλ / (x - L)^3)
-    G = p ./ (U - x)' .^ 2 - q ./ (x - L)' .^ 2
+    G = @. p / (U - x)'^2 - q / (x - L)'^2
 
-    Dx = Ψ + inv(Diagonal(x - α)) * Diagonal(ξ) + inv(Diagonal(β - x)) * Diagonal(η)
-    Dy = Diagonal(d) + inv(Diagonal(y)) * Diagonal(μ)
-    Dλ = inv(Diagonal(λ)) * Diagonal(s)
-    δx_ = ∂ψ - ε ./ (x - α) + ε ./ (β - x)
-    δy_ = c + Diagonal(d) * y - λ - ε ./ y
+    Dx = Ψ + Diagonal(@. ξ / (x - α) + η / (β - x))
+    Dy = Diagonal(@. d + μ / y)
+    Dλ = Diagonal(s ./ λ)
+    δx_ = @. ∂ψ - ε / (x - α) + ε / (β - x)
+    δy_ = @. c + d * y - λ - ε / y
     δz_ = a0 - λ ⋅ a - ε / z
-    δλ_ = g - a * z - y + r + ε ./ λ
+    δλ_ = @. g - a * z - y + r + ε / λ
 
     Dλy = Dλ + inv(Dy)
     δλy_ = δλ_ + inv(Dy) * δy_
@@ -89,11 +89,11 @@ function newton_direction(problem::MMAProblem)
     Δx = -inv(Dx) * G' * Δλ - inv(Dx) * δx_
     Δy = inv(Dy) * Δλ - inv(Dy) * δy_
 
-    Δξ = -inv(Diagonal(x - α)) * Diagonal(ξ) * Δx - ξ + ε ./ (x - α)
-    Δη = inv(Diagonal(β - x)) * Diagonal(η) * Δx - η + ε ./ (β - x)
-    Δμ = -inv(Diagonal(y)) * Diagonal(μ) * Δy - μ + ε ./ y
+    Δξ = @. -ξ * Δx / (x - α) - ξ + ε / (x - α)
+    Δη = @. η * Δx / (β - x) - η + ε / (β - x)
+    Δμ = @. -μ * Δy / y - μ + ε / y
     Δζ = -(ζ / z) * Δz - ζ + ε / z
-    Δs = -inv(Diagonal(λ)) * Diagonal(s) * Δλ - s + ε ./ λ
+    Δs = @. -s * Δλ / λ - s + ε / λ
 
     return Δx, Δy, Δz, Δλ, Δξ, Δη, Δμ, Δζ, Δs
 end
@@ -113,7 +113,7 @@ function step_primal_dual!(problem::MMAProblem, Δw)
     tμ = maximum(@. -1.01 * Δμ / μ)
     tζ = -1.01 * Δζ / ζ
     ts = maximum(@. -1.01 * Δs / s)
-    t = 1 / max(tα, tβ, ty, tz, tλ, tξ, tη, tμ, tζ, ts, 1)
+    t = 1.0 / max(tα, tβ, ty, tz, tλ, tξ, tη, tμ, tζ, ts, 1.0)
 
     initial_residual = primal_dual_kkt_residuals(problem)
     norm_initial_residual = norm(initial_residual)
