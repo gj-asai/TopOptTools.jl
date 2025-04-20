@@ -37,7 +37,7 @@ function FEResults(model::FEModel)
     ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), get_nvar(model) * getncells(model.grid))
 
     # preallocate solution
-    u = zeros(get_dim(model) * getnnodes(model.grid))
+    u = zeros(ndofs(model.dh))
 
     chnl = Channel{ScratchData}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
@@ -47,7 +47,7 @@ function FEResults(model::FEModel)
     return FEResults(K, f, ∂Ke∂x, u, chnl)
 end
 
-function fea!(results::FEResults, x::Vector, model::FEModel)
+function fea!(results::FEResults, x::DesignVariables, model::FEModel)
     @unpack K, f, u = results
 
     @timeit timer "assemble" begin
@@ -63,7 +63,7 @@ function fea!(results::FEResults, x::Vector, model::FEModel)
     end
 end
 
-function global_stiffness!(results::FEResults, x::Vector, model::FEModel)
+function global_stiffness!(results::FEResults, x::DesignVariables, model::FEModel)
     @unpack K, ∂Ke∂x, chnl = results
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
@@ -77,7 +77,7 @@ function global_stiffness!(results::FEResults, x::Vector, model::FEModel)
 
             Ferrite.reinit!(cell_cache, e)
             Ferrite.reinit!(cellvalues, cell_cache)
-            xe = @view x[nvar*(e-1)+1:nvar*e]
+            xe = element_slice(x, e)
 
             ForwardDiff.jacobian!(jac, (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model), Ke, xe)
             for var_idx = 1:nvar
@@ -90,7 +90,7 @@ function global_stiffness!(results::FEResults, x::Vector, model::FEModel)
     end
 end
 
-function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector{T}, cellvalues::CellValues, model::FEModel) where {T<:Real}
+function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellValues, model::FEModel) where {T<:Real}
     fill!(Ke, zero(T))
 
     @inbounds for q_point in 1:getnquadpoints(cellvalues)

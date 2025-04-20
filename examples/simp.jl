@@ -10,41 +10,50 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
     reset_timer!()
     !isnothing(filename) && (pvd = paraview_collection(filename))
 
-    # mesh
-    grid = redirect_stdout(devnull) do
-        togrid("examples/models/mbb.msh")
+    @timeit "read mesh" begin
+        grid = redirect_stdout(devnull) do
+            togrid("examples/models/mbb.msh")
+        end
+        addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
+        addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right corner
+        addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left corner
     end
-    addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
-    addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right corner
-    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left corner
 
-    # material
-    mat = Isotropic2D(E=1e3, nu=0.3)
-    mat_interp = SIMP(mat, 3.0)
+    @timeit "build model" begin
+        # Define materials
+        mat = Isotropic2D(E=1e3, nu=0.3)
+        mat_interp = SIMP(mat, 3.0)
 
-    # FE model
-    model = TopOpt.FEModel(
-        grid=grid,
-        ip=Lagrange{RefQuadrilateral,1}(), # linear elements
-        qr=QuadratureRule{RefQuadrilateral}(2), # 2 point quadrature
-        mat_interp=mat_interp,
-        constraints=[
-            Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> 0.0, [1]), # block x displacement
-            Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
-        ],
-        loads=[
-            TopOpt.NodalLoad("force", (0.0, -100.0)),
-        ],
-    )
-    density_filter = ConvolutionFilter(rρ, model)
+        # FE model
+        ip = Lagrange{RefQuadrilateral,1}() # linear elements
+        qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
+        model = TopOpt.FEModel(
+            grid=grid,
+            ip=ip,
+            qr=qr,
+            mat_interp=mat_interp,
+            constraints=[
+                Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> 0.0, [1]), # block x displacement
+                Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
+            ],
+            loads=[
+                TopOpt.NodalLoad("force", (0.0, -100.0)),
+            ],
+        )
 
-    results = FEResults(model)
+        results = FEResults(model)
+        num_elem = getncells(model.grid)
 
-    # Defining initial values
-    num_elem = getncells(model.grid)
-    x0 = fill(volfrac, num_elem)
-    xmin = fill(1e-3, num_elem)
-    xmax = fill(1, num_elem)
+        # Defining initial values
+        x0 = DesignVariables(1)
+        foreach(1:num_elem) do _
+            push!(x0, volfrac, 1e-3, 1)
+        end
+    end
+
+    @timeit "build filters" begin
+        density_filter = ConvolutionFilter(rρ, model)
+    end
 
     # Objective: compliance
     function objective(x)
@@ -97,19 +106,14 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
                     pvd[i] = vtk
                 end
             end
-
-        # Continuation up to p = 3
-        Δfrel = abs(solution.f - solution.prevf) / solution.prevf
-        if Δfrel < 1e-3 && Δfrel > opts.reltol && model.mat_interp.penal < 3.0
-            model.mat_interp.penal += 1.0
-            @info "Updated p to $(model.mat_interp.penal)"
-        end
     end
 
     # Run optimization
     opts = OptimOpts(maxiter=maxiter, reltol=1e-5)
     x = try
-        x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
+        reset_timer!(TopOpt.timer)
+        # x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
+        x, _ = MMA.optimize(x0, MMA.Objective(objective, dobjective), MMA.Constraints(constraint, dconstraint))
 
         # Evaluate final design
         model.mat_interp.penal = 3.0
@@ -121,6 +125,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
         @warn "Computation interrupted - $(typeof(e))"
         history[:final_compliance] = NaN
         x = history[:final_x]
+        rethrow()
     end
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 

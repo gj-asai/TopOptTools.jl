@@ -8,4 +8,9 @@ using Tensors
     include("material.jl")
     include("fea.jl")
 end
+
+@testset "MMA.jl" begin
+    include("mma.jl")
+end
+
 nothing

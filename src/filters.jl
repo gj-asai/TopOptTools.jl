@@ -3,43 +3,46 @@ struct ConvolutionFilter{TH<:SparseMatrixCSC}
 end
 
 function ConvolutionFilter(radius::Float64, model::FEModel)
-    if radius == 0
-        n = getncells(model.grid)
-        return ConvolutionFilter(sparse(I, n, n))
-    end
+    n = getncells(model.grid)
+
+    radius == 0 && return ConvolutionFilter(sparse(I, n, n))
 
     @info "Building convolution filter"
     centers = model.centers
     iH, jH = Int[], Int[]
     sH = Float64[]
 
-    curi, curj = Int[], Int[]
-    curs = Float64[]
-    for i in 1:getncells(model.grid)
-        empty!(curi)
-        empty!(curj)
-        empty!(curs)
-        for j in inrange(model.balltree, centers[:, i], 1.2 * radius)
-            dist = sqrt(sum((centers[:, i] - centers[:, j]) .^ 2))
+    tmp_s = Float64[]
+    idx_cols = Int[]
+    for i in 1:n
+        empty!(tmp_s)
+        empty!(idx_cols)
+
+        @views inrange!(idx_cols, model.balltree, centers[:, i], 1.2 * radius)
+        for j in idx_cols
+            dist = @views norm(centers[:, i] - centers[:, j])
             dist > radius && continue
-            push!(curi, i)
-            push!(curj, j)
-            push!(curs, radius - dist)
+            push!(iH, i)
+            push!(jH, j)
+            push!(tmp_s, radius - dist)
         end
-        curs ./= sum(curs) # normalize row
-        append!(iH, curi)
-        append!(jH, curj)
-        append!(sH, curs)
+
+        # normalize row
+        tmp_s ./= sum(tmp_s)
+        append!(sH, tmp_s)
     end
 
     H = sparse(iH, jH, sH)
     return ConvolutionFilter(H)
 end
 
-function filter!(x::AbstractVector, f::ConvolutionFilter)
+filter!(x::DesignVariables, f::ConvolutionFilter) = filter!(x.variables, f) # would work without this, but with really bad performance
+function filter!(x::Vector, f::ConvolutionFilter)
     x .= f.H * x
 end
 
 function filter!(x::AbstractVector, weight::AbstractVector, f::ConvolutionFilter)
-    x .= f.H * (weight .* x) ./ weight
+    x .*= weight
+    filter!(x, f)
+    x ./= weight
 end

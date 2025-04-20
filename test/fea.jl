@@ -63,7 +63,10 @@ end
             TopOpt.NodalLoad("force", (0.0, -1.0)),
         ],
     )
-    x = ones(4)
+    x = DesignVariables(1, Float64)
+    foreach(1:4) do _
+        push!(x, 1.0, 1e-3, 1.0)
+    end
 
     results = FEResults(model)
     fea!(results, x, model)
@@ -117,9 +120,11 @@ end
             TopOpt.NodalLoad("force", (0.0, -1.0)),
         ],
     )
-    x = zeros(30)
-    x[1:2:end] .= 0.5
-    x[2:2:end] .= deg2rad(45)
+    x = DesignVariables(2, Float64)
+    foreach(1:15) do _
+        push!(x, 0.5, 1e-3, 1.0)
+        push!(x, deg2rad(45), -π, π)
+    end
 
     results = FEResults(model)
     fea!(results, x, model)
@@ -170,10 +175,12 @@ end
             TopOpt.NodalLoad("force", (0.0, -1.0)),
         ],
     )
-    x = zeros(45)
-    x[1:3:end] .= 0.2
-    x[2:3:end] .= 0.3
-    x[3:3:end] .= deg2rad(45)
+    x = DesignVariables(3, Float64)
+    foreach(1:15) do _
+        push!(x, 0.2, 1e-3, 1.0)
+        push!(x, 0.3, 1e-3, 1.0)
+        push!(x, deg2rad(45), -π, π)
+    end
 
     results = FEResults(model)
     fea!(results, x, model)

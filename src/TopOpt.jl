@@ -3,29 +3,29 @@ module TopOpt
 using MKL
 using Ferrite,
     Tensors,
+    LinearAlgebra,
     SparseArrays,
     Sparspak,
     LinearSolve,
     ForwardDiff,
-    Nonconvex,
-    NonconvexMMA,
     NearestNeighbors,
     OhMyThreads,
     UnPack,
     TimerOutputs
 
-Nonconvex.@load MMA
-
 export Isotropic2D, Orthotropic2D, Orthotropic3D,
     SIMP, SOMP, MMSOMP,
     NodalLoad, LinearLoad,
     FEModel,
+    DesignVariables, MMA,
     FEResults, fea!, stress,
     ConvolutionFilter, filter!,
-    OptimOpts, topopt,
+    OptimOpts,
     compliance, dcompliance,
     impact, dimpact,
     volume, dvolume
+
+include("design_variables.jl")
 
 # Finite element analysis
 include("material.jl")
@@ -34,6 +34,7 @@ include("femodel.jl")
 include("fea.jl")
 
 # Optimization
+include("MMA/MMA.jl")
 include("filters.jl")
 include("optimization.jl")
 include("interpolations/simp.jl")
