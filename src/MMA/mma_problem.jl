@@ -75,6 +75,7 @@ struct MMAProblem{T<:Real,TF<:Objective,TG<:Constraints}
     approx::ConvexApproximation{T}
     state::MMAState{T}
     primal_dual::PrimalDualState{T}
+    residuals::Vector{T}
     artificial::ArtificialParameters{T}
     f::TF
     g::TG
@@ -88,6 +89,7 @@ function MMAProblem(x0::DesignVariables{T}, obj::Objective, cons::Constraints) w
         ConvexApproximation(n, m, T),
         MMAState(x0, obj(x0)..., cons(x0)...),
         PrimalDualState(length(x0), m, T),
+        Vector{T}(undef, 3n + 4m + 2),
         ArtificialParameters(m, T),
         obj, cons, n, m
     )

@@ -26,8 +26,8 @@ function solve_subproblem!(prob::MMAProblem)
         for _ = 1:200
             norm_inf_residual < 0.9 * primal_dual.ε && break
             Δw = newton_direction(prob)
-            residual = step_primal_dual!(prob, Δw)
-            norm_inf_residual = norm(residual, Inf)
+            step_primal_dual!(prob, Δw)
+            norm_inf_residual = norm(prob.residuals, Inf)
         end
         primal_dual.ε *= 0.1
     end

@@ -47,8 +47,8 @@ function update_convex_approximation!(prob::MMAProblem)
     @. p0 = (U - xref)^2 * (1.001 * df_plus + 0.001 * df_minus + 1e-5 / x_range)
     @. q0 = (xref - L)^2 * (0.001 * df_plus + 1.001 * df_minus + 1e-5 / x_range)
     for i in 1:prob.m
-        @. p[i, :] = (U - xref) .^ 2 * (1.001 * dg_plus[i, :] + 0.001 * dg_minus[i, :] + 1e-5 / x_range)
-        @. q[i, :] = (xref - L) .^ 2 * (0.001 * dg_plus[i, :] + 1.001 * dg_minus[i, :] + 1e-5 / x_range)
-        r[i] = cur_cons[i] - sum(@. p[i, :] / (U - xref) + q[i, :] / (xref - L))
+        @. p[i, :] = @views (U - xref) .^ 2 * (1.001 * dg_plus[i, :] + 0.001 * dg_minus[i, :] + 1e-5 / x_range)
+        @. q[i, :] = @views (xref - L) .^ 2 * (0.001 * dg_plus[i, :] + 1.001 * dg_minus[i, :] + 1e-5 / x_range)
+        r[i] = @views cur_cons[i] - sum(@. p[i, :] / (U - xref) + q[i, :] / (xref - L))
     end
 end

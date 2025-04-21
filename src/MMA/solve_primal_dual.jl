@@ -13,6 +13,8 @@ function reset_primal_dual!(problem::MMAProblem)
     @. state.μ = max(1.0, c / 2)
     state.ζ = 1.0
     fill!(state.s, 1.0)
+
+    nothing
 end
 
 function move_primal_dual!(state::PrimalDualState, step, direction)
@@ -27,10 +29,12 @@ function move_primal_dual!(state::PrimalDualState, step, direction)
     @. state.μ += step * Δμ
     state.ζ += step * Δζ
     @. state.s += step * Δs
+
+    nothing
 end
 
-function primal_dual_kkt_residuals(problem::MMAProblem{T}) where {T}
-    @unpack approx, artificial, primal_dual = problem
+function update_kkt_residuals!(problem::MMAProblem)
+    @unpack approx, artificial, primal_dual, residuals, m, n = problem
     @unpack L, U, α, β, p0, q0, p, q, r = approx
     @unpack a0, a, c, d = artificial
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
@@ -41,18 +45,17 @@ function primal_dual_kkt_residuals(problem::MMAProblem{T}) where {T}
 
     ∂ψ = @. pλ / (U - x)^2 - qλ / (x - L)^2
 
-    residuals = T[]
-    append!(residuals, ∂ψ .- ξ .+ η)
-    append!(residuals, c .+ d .* y .- λ .- μ)
-    push!(residuals, a0 - ζ - λ ⋅ a)
-    append!(residuals, g .- a .* z .- y .+ s .+ r)
-    append!(residuals, ξ .* (x .- α) .- ε)
-    append!(residuals, η .* (β .- x) .- ε)
-    append!(residuals, μ .* y .- ε)
-    push!(residuals, ζ * z - ε)
-    append!(residuals, λ .* s .- ε)
+    @. residuals[1:n] = ∂ψ - ξ + η
+    @. residuals[n+1:n+m] = c + d * y - λ - μ
+    residuals[n+m+1] = a0 - ζ - λ ⋅ a
+    @. residuals[n+m+2:n+2m+1] = g - a * z - y + s + r
+    @. residuals[n+2m+2:2n+2m+1] = ξ * (x - α) - ε
+    @. residuals[2n+2m+2:3n+2m+1] = η * (β - x) - ε
+    @. residuals[3n+2m+2:3n+3m+1] = μ * y - ε
+    residuals[3n+3m+2] = ζ * z - ε
+    @. residuals[3n+3m+3:3n+4m+2] = λ * s - ε
 
-    return residuals
+    nothing
 end
 
 function newton_direction(problem::MMAProblem)
@@ -115,19 +118,17 @@ function step_primal_dual!(problem::MMAProblem, Δw)
     ts = maximum(@. -1.01 * Δs / s)
     t = 1.0 / max(tα, tβ, ty, tz, tλ, tξ, tη, tμ, tζ, ts, 1.0)
 
-    initial_residual = primal_dual_kkt_residuals(problem)
-    norm_initial_residual = norm(initial_residual)
+    update_kkt_residuals!(problem)
+    norm_initial_residual = norm(problem.residuals)
 
     move_primal_dual!(problem.primal_dual, t, Δw)
-    new_residual = primal_dual_kkt_residuals(problem)
+    update_kkt_residuals!(problem)
     for _ = 1:50
-        norm(new_residual) < norm_initial_residual && break
+        norm(problem.residuals) < norm_initial_residual && break
 
         # if residual increased, walk half way back
         t /= 2
         move_primal_dual!(problem.primal_dual, -t, Δw)
-        new_residual = primal_dual_kkt_residuals(problem)
+        update_kkt_residuals!(problem)
     end
-
-    return new_residual
 end
