@@ -1,8 +1,8 @@
-struct DesignVariables{TV<:Real,TL<:Real} <: AbstractVector{TV}
-    variables::Vector{TV}
+struct DesignVariables{T1<:Real,T2<:Real,TV<:AbstractVector{T1},TL<:AbstractVector{T2}} <: AbstractVector{T1}
+    variables::TV
     vars_per_element::Int
-    lim_inf::Vector{TL}
-    lim_sup::Vector{TL}
+    lim_inf::TL
+    lim_sup::TL
 end
 DesignVariables(vars_per_element::Int, ::Type{T}) where {T} = DesignVariables(T[], vars_per_element, T[], T[])
 DesignVariables(vars_per_element::Int) = DesignVariables(vars_per_element, Float64)
@@ -43,3 +43,7 @@ find_dv(x) = x
 find_dv(::Tuple{}) = nothing
 find_dv(x::DesignVariables, _) = x
 find_dv(::Any, rest) = find_dv(rest)
+
+# define views and multiplication for the filters
+Base.view(A::DesignVariables, inds...) = DesignVariables(view(A.variables, inds...), A.vars_per_element, view(A.lim_inf, inds...), view(A.lim_sup, inds...))
+LinearAlgebra.mul!(C::DesignVariables, A::AbstractVecOrMat, B::DesignVariables, α::Number, β::Number) = mul!(C.variables, A, B.variables, α, β)

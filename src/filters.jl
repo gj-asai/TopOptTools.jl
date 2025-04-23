@@ -36,8 +36,7 @@ function ConvolutionFilter(radius::Float64, model::FEModel)
     return ConvolutionFilter(H)
 end
 
-filter!(x::DesignVariables, f::ConvolutionFilter) = filter!(x.variables, f) # would work without this, but with really bad performance
-function filter!(x::Vector, f::ConvolutionFilter)
+function filter!(x::AbstractVector, f::ConvolutionFilter)
     x .= f.H * x
 end
 
