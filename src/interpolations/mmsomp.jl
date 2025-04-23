@@ -36,7 +36,7 @@ end
 
 function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
     @unpack u, ∂Ke∂x = results
-    dcdx = zeros(length(∂Ke∂x))
+    dcdx = zeros(T, length(∂Ke∂x))
     for cell in CellIterator(model.dh)
         ue = u[celldofs(cell)]
         e = cellid(cell)
@@ -57,7 +57,7 @@ function impact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,d
 end
 
 function dimpact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
-    dCO2dx = zero(x)
+    dCO2dx = zeros(T, length(x))
     for (i, mati) in enumerate(model.mat_interp.mat)
         dCO2dx[i:nvar:end] .= mati.CO2 * mati.ρ * model.elemvol
     end
@@ -70,7 +70,7 @@ function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,d
 end
 
 function dvolume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
-    ∂g∂x = zero(x)
+    ∂g∂x = zeros(T, length(x))
     for i = 1:length(model.mat_interp.mat)
         ∂g∂x[i:nvar:end] .= model.elemvol / sum(model.elemvol)
     end

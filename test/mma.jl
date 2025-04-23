@@ -18,9 +18,10 @@
     dg(x) = [-183 / x[1]^4, -111 / x[2]^4, -57 / x[3]^4, -21 / x[4]^4, -3 / x[5]^4]
     constraint = MMA.Constraints(g, dg)
 
-    x, minf = MMA.optimize(x0, objective, constraint)
-    @test x ≈ [6.016, 5.309, 4.494, 3.502, 2.153] atol = 1e-3
-    @test minf ≈ 1.340 atol = 1e-3
+    opts = MMA.OptimOpts(maxiter=100, reltol=1e-8)
+    sol = MMA.optimize(x0, objective, constraint; opts)
+    @test sol.x ≈ [6.016, 5.309, 4.494, 3.502, 2.153] atol = 1e-3
+    @test sol.cur_obj ≈ 1.340 atol = 1e-3
 end
 
 @testset "2 bar truss" begin
@@ -41,7 +42,8 @@ end
     dg2(x) = [-C2 * (8 * x[2] - 1) * sqrt(1 + x[2]^2) / (x[1]^2 * x[2]), C2 * (8 * x[2]^3 + 1) / (x[1] * x[2]^2 * sqrt(1 + x[2]^2))]
     constraint = MMA.Constraints([g1, g2], [dg1, dg2])
 
-    x, minf = MMA.optimize(x0, objective, constraint)
-    @test x ≈ [1.41, 0.38] atol = 1e-2
-    @test minf ≈ 1.51 atol = 1e-2
+    opts = MMA.OptimOpts(maxiter=100, reltol=1e-8)
+    sol = MMA.optimize(x0, objective, constraint; opts)
+    @test sol.x ≈ [1.41, 0.38] atol = 1e-2
+    @test sol.cur_obj ≈ 1.51 atol = 1e-2
 end

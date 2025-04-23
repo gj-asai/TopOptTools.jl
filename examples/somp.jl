@@ -2,24 +2,24 @@ using Ferrite, FerriteGmsh
 using TimerOutputs
 using WriteVTK, JLD2
 using Printf
-using Random
 
 using TopOpt
 
 function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=nothing, save_partial=false)
-    @info "Starting optimization with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, angle=$angle"
-    Random.seed!(1234)
+    @info "SOMP with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, angle=$angle"
     reset_timer!()
     !isnothing(filename) && save_partial && (pvd = paraview_collection(filename))
 
     # Import mesh
     @timeit "read mesh" begin
+        mesh_file = "examples/models/mbb.msh"
         grid = redirect_stdout(devnull) do
-            togrid("examples/models/mbb.msh")
+            togrid(mesh_file)
         end
         addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
         addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right corner
         addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left corner
+        @info "Done reading $(mesh_file): $(getnnodes(grid)) nodes, $(getncells(grid)) elements"
     end
 
     @timeit "build model" begin
@@ -48,18 +48,11 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
         num_elem = getncells(model.grid)
 
         # Defining initial values
-        x0 = zeros(2 * num_elem)
-        xmin = zeros(2 * num_elem)
-        xmax = zeros(2 * num_elem)
-
-        x0[1:2:end] .= fill(volfrac, num_elem)
-        xmin[1:2:end] .= fill(1e-3, num_elem)
-        xmax[1:2:end] .= fill(1, num_elem)
-
-        x0[2:2:end] .= fill(deg2rad(angle), num_elem)
-        # x0[2:2:end] .= π * rand(getncells(model.grid)) .- π / 2
-        xmin[2:2:end] .= fill(-π, num_elem)
-        xmax[2:2:end] .= fill(π, num_elem)
+        x0 = DesignVariables(2)
+        foreach(1:num_elem) do _
+            push!(x0, volfrac, 1e-3, 1)
+            push!(x0, deg2rad(angle), -π, π)
+        end
     end
 
     @timeit "build filters" begin
@@ -79,10 +72,12 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
 
         return dcdx
     end
+    obj = MMA.Objective(objective, dobjective)
 
     # Constraint: max volume fraction
     constraint(x) = TopOpt.volume(x, results, model) / volfrac - 1
     dconstraint(x) = dvolume(x, results, model) / volfrac
+    cons = MMA.Constraints(constraint, dconstraint)
 
     # After each iteration:
     # - Print current state
@@ -98,21 +93,21 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
         :constraint => Vector{Float64}[],
         :final_compliance => 0,
     )
-    function post(solution; kwargs...)
-        get(kwargs, :update, false) && return
+    function post(mma_state)
+        @info @sprintf "It = %4d | c = %10.4f" mma_state.it mma_state.cur_obj
 
-        x = solution.x
+        x = mma_state.x
         comp = compliance(x, results, model)
         CO2 = impact(x, results, model)
 
         # Push to history
-        history[:final_x] = solution.prevx
+        history[:final_x] = mma_state.x
         history[:final_u] = results.u
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
         push!(history[:penal], mat_interp.penal)
-        push!(history[:objective], solution.f)
-        push!(history[:constraint], solution.g)
+        push!(history[:objective], mma_state.cur_obj)
+        push!(history[:constraint], mma_state.cur_cons)
 
         # Save iteration
         !isnothing(filename) && save_partial && @timeit "export" begin
@@ -126,17 +121,19 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
             end
 
         # Continuation up to p = 3
-        Δfrel = abs(solution.f - solution.prevf) / solution.prevf
-        if Δfrel < 5e-4 && Δfrel > opts.reltol && model.mat_interp.penal < 3.0
+        Δfrel = MMA.relative_change(mma_state)
+        if Δfrel < 5e-4 && model.mat_interp.penal < 3.0
             model.mat_interp.penal += 1.0
             @info "Updated p to $(model.mat_interp.penal)"
         end
     end
 
     # Run optimization
-    opts = OptimOpts(maxiter=maxiter, reltol=1e-8)
+    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-6)
     x = try
-        x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
+        @info "Starting optimization with p = $(model.mat_interp.penal)"
+        sol = MMA.optimize(x0, obj, cons; post, opts)
+        x = sol.x
 
         # Evaluate final design
         model.mat_interp.penal = 3.0

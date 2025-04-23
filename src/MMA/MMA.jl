@@ -8,13 +8,14 @@ using UnPack,
 
 using ..TopOpt
 
-export Objective, Constraints
-export optimize
+export Objective, Constraints,
+    optimize,
+    relative_change
 
 include("function_containers.jl")
 include("mma_problem.jl")
 include("convex_approximation.jl")
-include("solve_primal_dual.jl")
+include("subproblem.jl")
 include("optimize.jl")
 
 end

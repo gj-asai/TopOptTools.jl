@@ -39,9 +39,9 @@ function update_kkt_residuals!(problem::MMAProblem)
     @unpack a0, a, c, d = artificial
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
 
-    g = sum(p ./ (U .- x)' + q ./ (x .- L)', dims=2) |> vec
-    pλ = p0 + p' * λ
-    qλ = q0 + q' * λ
+    g = sum(p ./ (U .- x)' .+ q ./ (x .- L)', dims=2) |> vec
+    pλ = p0 .+ p' * λ
+    qλ = q0 .+ q' * λ
 
     ∂ψ = @. pλ / (U - x)^2 - qλ / (x - L)^2
 
@@ -64,9 +64,9 @@ function newton_direction(problem::MMAProblem)
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
     @unpack a0, a, c, d = artificial
 
-    g = sum(p ./ (U .- x)' + q ./ (x .- L)', dims=2) |> vec
-    pλ = p0 + p' * λ
-    qλ = q0 + q' * λ
+    g = sum(p ./ (U .- x)' .+ q ./ (x .- L)', dims=2) |> vec
+    pλ = p0 .+ p' * λ
+    qλ = q0 .+ q' * λ
 
     ∂ψ = @. pλ / (U - x)^2 - qλ / (x - L)^2
     Ψ = Diagonal(@. 2 * pλ / (U - x)^3 + 2 * qλ / (x - L)^3)
@@ -131,4 +131,6 @@ function step_primal_dual!(problem::MMAProblem, Δw)
         move_primal_dual!(problem.primal_dual, -t, Δw)
         update_kkt_residuals!(problem)
     end
+
+    nothing
 end

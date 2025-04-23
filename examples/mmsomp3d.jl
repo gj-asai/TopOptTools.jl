@@ -5,19 +5,21 @@ using Printf
 
 using TopOpt
 
-function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=500, angle=0, filename=nothing)
-    @info "Starting optimization with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, angle=$angle"
+function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=500, angle=0, filename=nothing, save_partial=false)
+    @info "MMSOMP with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, w=$wimpact, angle=$angle"
     reset_timer!()
-    !isnothing(filename) && (pvd = paraview_collection(filename))
+    !isnothing(filename) && save_partial && (pvd = paraview_collection(filename))
 
     # Import mesh
     @timeit "read mesh" begin
+        mesh_file = "examples/models/mbb3d.msh"
         grid = redirect_stdout(devnull) do
-            togrid("examples/models/mbb3d.msh")
+            togrid(mesh_file)
         end
         addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left face
         addnodeset!(grid, "support", x -> x[1] ≈ 100.0 && x[2] ≈ 0.0) # bottom right edge
         addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 40.0) # top left edge
+        @info "Done reading $(mesh_file): $(getnnodes(grid)) nodes, $(getncells(grid)) elements"
     end
 
     @timeit "build model" begin
@@ -42,21 +44,18 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         )
 
         results = TopOpt.FEResults(model)
+        num_elem = getncells(model.grid)
         nvar = TopOpt.get_nvar(model)
         nmaterials = nvar - 1
 
         # Defining initial values
-        x0 = zeros(nvar * getncells(model.grid))
-        xmin = zeros(nvar * getncells(model.grid))
-        xmax = zeros(nvar * getncells(model.grid))
-        for i = 1:nmaterials
-            x0[i:nvar:end] .= fill(volfrac / nmaterials, getncells(model.grid))
-            xmin[i:nvar:end] .= fill(1e-3, getncells(model.grid))
-            xmax[i:nvar:end] .= fill(1, getncells(model.grid))
+        x0 = DesignVariables(nvar)
+        foreach(1:num_elem) do _
+            foreach(1:nmaterials) do _
+                push!(x0, volfrac / nmaterials, 1e-3, 1)
+            end
+            push!(x0, deg2rad(angle), -π, π)
         end
-        x0[nmaterials+1:nvar:end] .= fill(deg2rad(angle), getncells(model.grid))
-        xmin[nmaterials+1:nvar:end] .= fill(-π, getncells(model.grid))
-        xmax[nmaterials+1:nvar:end] .= fill(π, getncells(model.grid))
     end
 
     @timeit "build filters" begin
@@ -90,10 +89,12 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
 
         return (1 - wimpact) * dcdx / comp_ini + wimpact * dCO2dx / CO2_ini
     end
+    obj = MMA.Objective(objective, dobjective)
 
     # Constraint: max volume fraction
     constraint(x) = TopOpt.volume(x, results, model) / volfrac - 1
     dconstraint(x) = dvolume(x, results, model) / volfrac
+    cons = MMA.Constraints(constraint, dconstraint)
 
     # After each iteration:
     # - Filter orientations
@@ -108,65 +109,65 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         :constraint => Vector{Float64}[],
         :final_compliance => 0,
     )
-    function post(solution; kwargs...)
-        # Filter orientations
-        x = solution.x
-        x[nmaterials+1:nvar:end] .= atan.(tan.(x[nmaterials+1:nvar:end]))
-        @views TopOpt.filter!(x[nmaterials+1:nvar:end], orientation_filter)
+    function post(mma_state)
+        x = mma_state.x
 
-        get(kwargs, :update, false) && return
-
-        # Print current state
         comp = compliance(x, results, model)
         CO2 = impact(x, results, model)
         volfracs = Float64[]
         for i = 1:nmaterials
             push!(volfracs, x[i:nvar:end] ⋅ model.elemvol / sum(model.elemvol))
         end
-        @info "c = $(round(comp, sigdigits=4))\tCO2 = $(round(CO2, sigdigits=4))\t volfracs = $(round.(100*volfracs, digits=2))"
+
+        formatted_volfracs = join([@sprintf("%5.2f", 100 * f) for f in volfracs], ", ")
+        @info @sprintf "It = %4d | obj = %8.4f | c = %10.4f | CO2 = %8.4f | volfracs = [%s] %%" mma_state.it mma_state.cur_obj comp CO2 formatted_volfracs
 
         # Push to history
-        history[:final_x] = solution.prevx
+        history[:final_x] = x
+        history[:final_u] = results.u
         push!(history[:compliance], comp)
         push!(history[:impact], CO2)
-        push!(history[:objective], solution.f)
-        push!(history[:constraint], solution.g)
+        push!(history[:penal], mat_interp.penal)
+        push!(history[:objective], mma_state.cur_obj)
+        push!(history[:constraint], mma_state.cur_cons)
 
         # Save iteration
-        !isnothing(filename) && @timeit "export" begin
-            i = length(history[:compliance]) - 1
-            filename_i = @sprintf "%s.%4.4d.vtu" filename i
-            VTKGridFile(filename_i, grid) do vtk
-                write_cell_data(vtk, @view(x[1:3:end]), "carbon")
-                write_cell_data(vtk, @view(x[2:3:end]), "bamboo")
-                write_cell_data(vtk, @view(x[3:3:end]), "theta")
-                pvd[i] = vtk
+        !isnothing(filename) && save_partial && @timeit "export" begin
+                i = length(history[:compliance]) - 1
+                filename_i = @sprintf "%s.%4.4d.vtu" filename i
+                VTKGridFile(filename_i, grid) do vtk
+                    write_cell_data(vtk, @view(x[1:3:end]), "carbon")
+                    write_cell_data(vtk, @view(x[2:3:end]), "bamboo")
+                    write_cell_data(vtk, @view(x[3:3:end]), "theta")
+                    pvd[i] = vtk
+                end
             end
-        end
 
         # Continuation up to p = 5
-        Δfrel = abs(solution.f - solution.prevf) / solution.prevf
-        if Δfrel < 5e-4 && Δfrel > opts.reltol && model.mat_interp.penal < 5.0
+        Δfrel = MMA.relative_change(mma_state)
+        if Δfrel < 5e-4 && model.mat_interp.penal < 5.0
             model.mat_interp.penal += 1.0
             @info "Updated p to $(model.mat_interp.penal)"
         end
     end
 
     # Run optimization
-    opts = OptimOpts(maxiter=maxiter, reltol=1e-5)
-    try
-        x = topopt(objective, dobjective, constraint, dconstraint, x0, xmin, xmax, model, opts, post)
+    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-5)
+    x = try
+        @info "Starting optimization with p = $(model.mat_interp.penal)"
+        sol = MMA.optimize(x0, obj, cons; post, opts)
+        x = sol.x
 
         # Evaluate final design
         model.mat_interp.penal = 3.0
         fea!(results, x, model)
         history[:final_compliance] = TopOpt.compliance(x, results, model)
         @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
+        x
     catch e
-        # stop optim and save after receiving a SIGINT
-        e isa InterruptException || e isa TaskFailedException || rethrow()
-        @warn "Computation interrupted"
-        x = history[:final_x]
+        @warn "Computation interrupted - $(typeof(e))"
+        history[:final_compliance] = NaN
+        history[:final_x]
     end
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 

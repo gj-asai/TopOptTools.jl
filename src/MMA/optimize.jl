@@ -1,17 +1,38 @@
-function optimize(x0::DesignVariables, obj::Objective, cons::Constraints)
+@kwdef struct OptimOpts
+    maxiter::Int = 200
+    reltol::Float64 = 1e-3
+end
+
+const timer = TimerOutput()
+
+function optimize(
+    x0::DesignVariables, obj::Objective, cons::Constraints;
+    post=nothing,
+    opts::OptimOpts=OptimOpts()
+)
+    if isnothing(post)
+        post_fn(_) = nothing
+    else
+        post_fn = post
+    end
+
+    reset_timer!(timer)
+    reset_timer!(TopOpt.timer)
     prob = MMAProblem(x0, obj, cons)
 
-    for _ = 1:100
-        @timeit TopOpt.timer "mma" begin
+    for _ = 1:opts.maxiter
+        @timeit timer "mma" begin
             update_convex_approximation!(prob)
             solve_subproblem!(prob)
         end
         update_state!(prob)
+        post_fn(prob.state)
 
-        relative_change(prob.state) < 1e-8 && break
+        relative_change(prob.state) < opts.reltol && break
     end
+    merge!(TopOpt.timer, timer)
 
-    return prob.state.x, prob.state.cur_obj
+    return prob.state
 end
 
 function solve_subproblem!(prob::MMAProblem)
@@ -46,7 +67,6 @@ function update_state!(prob::MMAProblem)
     state.prev_obj = state.cur_obj
     state.cur_obj, state.cur_dobj = prob.f(state.x)
     state.cur_cons, state.cur_dcons = prob.g(state.x)
-    @info "It = $(state.it), obj = $(state.cur_obj)"
 end
 
 relative_change(state::MMAState) = abs(state.cur_obj - state.prev_obj) / state.prev_obj

@@ -20,10 +20,11 @@ export Isotropic2D, Orthotropic2D, Orthotropic3D,
     DesignVariables, MMA,
     FEResults, fea!, stress,
     ConvolutionFilter, filter!,
-    OptimOpts,
     compliance, dcompliance,
     impact, dimpact,
     volume, dvolume
+
+const timer = TimerOutput()
 
 include("design_variables.jl")
 
@@ -36,7 +37,6 @@ include("fea.jl")
 # Optimization
 include("MMA/MMA.jl")
 include("filters.jl")
-include("optimization.jl")
 include("interpolations/simp.jl")
 include("interpolations/somp.jl")
 include("interpolations/mmsomp.jl")

@@ -20,7 +20,7 @@ end
 
 function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
     @unpack u, ∂Ke∂x = results
-    dcdx = zeros(length(∂Ke∂x))
+    dcdx = zeros(T, length(∂Ke∂x))
     for cell in CellIterator(model.dh)
         ue = u[celldofs(cell)]
         e = cellid(cell)
@@ -50,7 +50,7 @@ function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,d
 end
 
 function dvolume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
-    ∂g∂x = zero(x)
+    ∂g∂x = zeros(T, length(x))
     ∂g∂x[1:2:end] .= model.elemvol / sum(model.elemvol)
     return ∂g∂x
 end

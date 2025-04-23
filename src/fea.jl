@@ -144,10 +144,8 @@ function compute_force_vector(model::FEModel)
     return f
 end
 
-function stress(result::FEResults, x::Vector, model::FEModel{dim}) where {dim}
+function stress(result::FEResults, x::DesignVariables, model::FEModel{dim}) where {dim}
     @unpack cellvalues, mat_interp, grid, dh = model
-    nvar = get_nvar(model)
-    u = result.u
 
     qp_global = [
         [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
@@ -179,8 +177,8 @@ function stress(result::FEResults, x::Vector, model::FEModel{dim}) where {dim}
         cell_principal = qp_principal[e]
         cell_directions = qp_directions[e]
         for q_point in 1:getnquadpoints(cellvalues)
-            xe = @view x[nvar*(e-1)+1:nvar*e]
-            ε = function_symmetric_gradient(cellvalues, q_point, u, celldofs(cell))
+            xe = element_slice(x, e)
+            ε = function_symmetric_gradient(cellvalues, q_point, result.u, celldofs(cell))
             σ = interpolate(xe, mat_interp) ⊡ ε
             s = dev(σ)
 
