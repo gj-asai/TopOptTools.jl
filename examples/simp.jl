@@ -54,6 +54,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
     end
 
     @timeit "build filters" begin
+        @info "Build density filter"
         density_filter = ConvolutionFilter(rρ, model)
     end
 

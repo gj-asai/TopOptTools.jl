@@ -56,7 +56,9 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
     end
 
     @timeit "build filters" begin
+        @info "Build density filter"
         density_filter = ConvolutionFilter(rρ, model)
+        @info "Build orientation filter"
         orientation_filter = ConvolutionFilter(rθ, model)
     end
 

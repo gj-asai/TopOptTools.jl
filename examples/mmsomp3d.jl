@@ -59,7 +59,9 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
     end
 
     @timeit "build filters" begin
+        @info "Build density filter"
         density_filter = ConvolutionFilter(rρ, model)
+        @info "Build orientation filter"
         orientation_filter = ConvolutionFilter(rθ, model)
     end
 

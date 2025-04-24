@@ -61,7 +61,9 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
     end
 
     @timeit "build filters" begin
+        @info "Build density filter"
         density_filter = ConvolutionFilter(rρ, model)
+        @info "Build orientation filter"
         orientation_filter = ConvolutionFilter(rθ, model)
     end
 
@@ -147,9 +149,9 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
                 end
             end
 
-        # Continuation up to p = 5
+        # Continuation up to p = 3
         Δfrel = MMA.relative_change(mma_state)
-        if Δfrel < 5e-4 && model.mat_interp.penal < 5.0
+        if Δfrel < 5e-4 && model.mat_interp.penal < 3.0
             model.mat_interp.penal += 1.0
             @info "Updated p to $(model.mat_interp.penal)"
         end

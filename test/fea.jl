@@ -63,7 +63,7 @@ end
             TopOpt.NodalLoad("force", (0.0, -1.0)),
         ],
     )
-    x = DesignVariables(1, Float64)
+    x = DesignVariables(1)
     foreach(1:4) do _
         push!(x, 1.0, 1e-3, 1.0)
     end
@@ -120,7 +120,7 @@ end
             TopOpt.NodalLoad("force", (0.0, -1.0)),
         ],
     )
-    x = DesignVariables(2, Float64)
+    x = DesignVariables(2)
     foreach(1:15) do _
         push!(x, 0.5, 1e-3, 1.0)
         push!(x, deg2rad(45), -π, π)
@@ -175,7 +175,7 @@ end
             TopOpt.NodalLoad("force", (0.0, -1.0)),
         ],
     )
-    x = DesignVariables(3, Float64)
+    x = DesignVariables(3)
     foreach(1:15) do _
         push!(x, 0.2, 1e-3, 1.0)
         push!(x, 0.3, 1e-3, 1.0)

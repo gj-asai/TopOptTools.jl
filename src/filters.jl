@@ -7,7 +7,6 @@ function ConvolutionFilter(radius::Float64, model::FEModel)
 
     radius == 0 && return ConvolutionFilter(sparse(I, n, n))
 
-    @info "Building convolution filter"
     centers = model.centers
     iH, jH = Int[], Int[]
     sH = Float64[]
@@ -18,10 +17,9 @@ function ConvolutionFilter(radius::Float64, model::FEModel)
         empty!(tmp_s)
         empty!(idx_cols)
 
-        @views inrange!(idx_cols, model.balltree, centers[:, i], 1.2 * radius)
+        @views inrange!(idx_cols, model.balltree, centers[:, i], radius)
         for j in idx_cols
             dist = @views norm(centers[:, i] - centers[:, j])
-            dist > radius && continue
             push!(iH, i)
             push!(jH, j)
             push!(tmp_s, radius - dist)

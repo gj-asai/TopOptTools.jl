@@ -7,9 +7,7 @@ using Tensors
 @testset "TopOpt.jl" begin
     include("material.jl")
     include("fea.jl")
-end
-
-@testset "MMA.jl" begin
+    include("filters.jl")
     include("mma.jl")
 end
 
