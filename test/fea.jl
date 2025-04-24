@@ -1,6 +1,8 @@
 # all expected values from
 # https://www.topopt.mek.dtu.dk/apps-and-software/topology-optimization-codes-written-in-python
 
+using Ferrite
+
 @testset "Element stiffness" begin
     # generate a mesh with a single element
     model = FEModel(

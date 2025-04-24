@@ -1,3 +1,5 @@
+using Tensors
+
 @testset "Isotropic 2D" begin
     E = 1.0
     nu = 0.3

@@ -1,6 +1,8 @@
 # all expected values from
 # https://www.topopt.mek.dtu.dk/apps-and-software/topology-optimization-codes-written-in-python
 
+using Ferrite
+
 @testset "Filtering a Vector" begin
     # 3x2 mbb
     model = FEModel(
@@ -11,14 +13,14 @@
         constraints=Dirichlet[],
         loads=NodalLoad{2,Float64}[],
     )
-    f = ConvolutionFilter(1.5, model)
+    filt = ConvolutionFilter(1.5, model)
 
     cell_order = [2, 4, 6, 1, 3, 5]
     x = [0.05837059, 0.27439468, 0.76653813, 0.29748424, 0.24750964, 0.24884174][cell_order]
     dc = [0.98923353, 0.90642167, 0.238167, 0.09401264, 0.46788691, 0.13252324][cell_order]
     expected_filtered = [2.01845418, 0.60828234, 0.16402637, 0.30627508, 0.44355712, 0.2129366][cell_order]
 
-    TopOpt.filter!(dc, x, f)
+    TopOpt.filter!(dc, x, filt)
     @test dc ≈ expected_filtered atol = 1e-7
 end
 
@@ -32,7 +34,7 @@ end
         constraints=Dirichlet[],
         loads=NodalLoad{2,Float64}[],
     )
-    f = ConvolutionFilter(1.5, model)
+    filt = ConvolutionFilter(1.5, model)
 
     cell_order = [2, 4, 6, 1, 3, 5]
     x = [0.05837059, 0.27439468, 0.76653813, 0.29748424, 0.24750964, 0.24884174][cell_order]
@@ -43,6 +45,6 @@ end
     for xe in x
         push!(x_dv, xe, 1e-3, 1)
     end
-    TopOpt.filter!(dc, x, f)
+    TopOpt.filter!(dc, x, filt)
     @test dc ≈ expected_filtered atol = 1e-7
 end
