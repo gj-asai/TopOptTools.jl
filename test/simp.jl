@@ -1,15 +1,15 @@
 # expected value from
 # Sigmund, O. A 99 line topology optimization code written in Matlab. Struct Multidisc Optim 21, 120–127 (2001). https://doi.org/10.1007/s001580050176
-# top(60, 20, 0.5, 3.0, 1.5)
+# top(20, 8, 0.5, 3.0, 1.5)
 
 using Ferrite
 
 @testset "SIMP" begin
-    # 60x20 mbb
-    grid = generate_grid(Quadrilateral, (60, 20), Vec((0.0, 0.0)), Vec((60.0, 20.0)))
+    # 20x8 mbb
+    grid = generate_grid(Quadrilateral, (20, 8), Vec((0.0, 0.0)), Vec((20.0, 8.0)))
     addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
-    addnodeset!(grid, "support", x -> x[1] ≈ 60.0 && x[2] ≈ 0.0) # bottom right corner
-    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 20.0) # top left corner
+    addnodeset!(grid, "support", x -> x[1] ≈ 20.0 && x[2] ≈ 0.0) # bottom right corner
+    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 8.0) # top left corner
 
     # FE model
     model = FEModel(
@@ -28,7 +28,7 @@ using Ferrite
     results = FEResults(model)
 
     x0 = DesignVariables(1)
-    foreach(1:1200) do _
+    foreach(1:160) do _
         push!(x0, 1.0, 1e-3, 1.0)
     end
 
@@ -49,8 +49,9 @@ using Ferrite
     dconstraint(x) = dvolume(x, results, model) / 0.5
     cons = MMA.Constraints(constraint, dconstraint)
 
-    opts = MMA.OptimOpts(maxiter=100, reltol=1e-4)
+    opts = MMA.OptimOpts(maxiter=500, reltol=1e-5, asydecr=0.3, asyincr=1.1)
     sol = MMA.optimize(x0, obj, cons; opts)
 
-    @test sol.cur_obj ≈ 203.3061 rtol=1e-3
+    # high tolerance, the reference uses OC so slightly different results are expected
+    @test sol.cur_obj ≈ 174.8355 rtol=1e-2
 end

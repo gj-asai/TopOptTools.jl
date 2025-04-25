@@ -70,6 +70,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
     fea!(results, x0, model)
     comp_ini = compliance(x0, results, model) * volfrac^model.mat_interp.penal
     CO2_ini = impact(x0, results, model)
+    @info @sprintf "Normalization factors: compliance => %.4f, CO2 => %.4f" comp_ini CO2_ini
 
     # Objective function: (1-w).compliance/c_0 + w.impact/CO2_0
     function objective(x)
@@ -109,6 +110,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         :impact => Float64[],
         :objective => Float64[],
         :constraint => Vector{Float64}[],
+        :volfracs => Vector{Float64}[],
         :final_compliance => 0,
     )
     function post(mma_state)
@@ -132,6 +134,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
         push!(history[:penal], mat_interp.penal)
         push!(history[:objective], mma_state.cur_obj)
         push!(history[:constraint], mma_state.cur_cons)
+        push!(history[:volfracs], volfracs)
 
         # Save iteration
         !isnothing(filename) && save_partial && @timeit "export" begin
@@ -154,7 +157,7 @@ function mbb_minimpact_mmsomp3d(volfrac, rρ, rθ, wimpact; echo=true, maxiter=5
     end
 
     # Run optimization
-    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-5)
+    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-5, asydecr=0.3, asyincr=1.1)
     x = try
         @info "Starting optimization with p = $(model.mat_interp.penal)"
         sol = MMA.optimize(x0, obj, cons; post, opts)

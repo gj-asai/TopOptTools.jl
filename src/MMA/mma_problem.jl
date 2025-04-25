@@ -13,6 +13,12 @@ end
 MMAState(x0, cur_obj, cur_dobj, cur_cons, cur_dcons) = MMAState(0, x0, similar(x0), similar(x0), cur_obj, Inf, cur_dobj, cur_cons, cur_dcons)
 
 struct ConvexApproximation{T<:Real}
+    # asymptote move limits
+    move::T
+    asyinit::T
+    asydecr::T
+    asyincr::T
+
     # asymptotes and variable limits
     L::Vector{T}
     U::Vector{T}
@@ -26,7 +32,8 @@ struct ConvexApproximation{T<:Real}
     q::Matrix{T}
     r::Vector{T}
 end
-ConvexApproximation(n::Int, m::Int, ::Type{T}) where {T<:Real} = ConvexApproximation(
+ConvexApproximation(n::Int, m::Int, opts::OptimOpts, ::Type{T}) where {T<:Real} = ConvexApproximation(
+    opts.move, opts.asyinit, opts.asydecr, opts.asyincr,
     Vector{T}(undef, n), # L
     Vector{T}(undef, n), # U
     Vector{T}(undef, n), # α
@@ -82,11 +89,11 @@ struct MMAProblem{T<:Real,TF<:Objective,TG<:Constraints}
     n::Int
     m::Int
 end
-function MMAProblem(x0::DesignVariables{T}, obj::Objective, cons::Constraints) where {T}
+function MMAProblem(x0::DesignVariables{T}, obj::Objective, cons::Constraints, opts::OptimOpts=OptimOpts()) where {T}
     n = length(x0)
     m = cons.m
     return MMAProblem(
-        ConvexApproximation(n, m, T),
+        ConvexApproximation(n, m, opts, T),
         MMAState(x0, obj(x0)..., cons(x0)...),
         PrimalDualState(length(x0), m, T),
         Vector{T}(undef, 3n + 4m + 2),

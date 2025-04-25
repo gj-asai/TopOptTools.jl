@@ -1,14 +1,8 @@
 function update_asymptotes!(prob::MMAProblem)
-    @unpack L, U, α, β = prob.approx
+    @unpack L, U, α, β, move, asyinit, asydecr, asyincr = prob.approx
     @unpack it, xprev1, xprev2 = prob.state
     x = prob.state.x
     x_range = x.lim_sup - x.lim_inf
-
-    albefa = 0.1
-    move = 0.5
-    asyinit = 0.5
-    asydecr = 0.7
-    asyincr = 1.2
 
     if it < 3
         @. L = x - asyinit * x_range
@@ -16,18 +10,18 @@ function update_asymptotes!(prob::MMAProblem)
     else
         variation = @. (x - xprev1) * (xprev1 - xprev2)
         γ = ones(prob.n)
-        @. γ[variation.<0] = asydecr
-        @. γ[variation.>0] = asyincr
+        @. γ[variation<0] = asydecr
+        @. γ[variation>0] = asyincr
 
-        @. L = x - γ * (x - L)
-        @. U = x + γ * (U - x)
+        @. L = x - γ * (xprev1 - L)
+        @. U = x + γ * (U - xprev1)
 
         @. L = max(x - 10 * x_range, min(L, x - 0.01 * x_range))
         @. U = max(x + 0.01 * x_range, min(U, x + 10 * x_range))
     end
 
-    @. α = max(x.lim_inf, L + albefa * (x - L), x - move * x_range)
-    @. β = min(x.lim_sup, U - albefa * (U - x), x + move * x_range)
+    @. α = max(x.lim_inf, L + 0.1 * (x - L), x - move * x_range)
+    @. β = min(x.lim_sup, U - 0.1 * (U - x), x + move * x_range)
 end
 
 function update_convex_approximation!(prob::MMAProblem)
@@ -44,11 +38,14 @@ function update_convex_approximation!(prob::MMAProblem)
     dg_plus = max.(cur_dcons, 0)
     dg_minus = max.(-cur_dcons, 0)
 
-    @. p0 = (U - xref)^2 * (1.001 * df_plus + 0.001 * df_minus + 1e-5 / x_range)
-    @. q0 = (xref - L)^2 * (0.001 * df_plus + 1.001 * df_minus + 1e-5 / x_range)
-    for i in 1:prob.m
-        @. p[i, :] = @views (U - xref) .^ 2 * (1.001 * dg_plus[i, :] + 0.001 * dg_minus[i, :] + 1e-5 / x_range)
-        @. q[i, :] = @views (xref - L) .^ 2 * (0.001 * dg_plus[i, :] + 1.001 * dg_minus[i, :] + 1e-5 / x_range)
-        r[i] = @views cur_cons[i] - sum(@. p[i, :] / (U - xref) + q[i, :] / (xref - L))
+    r .= cur_cons
+    for j in 1:prob.n
+        p0[j] = (U[j] - xref[j])^2 * (1.001 * df_plus[j] + 0.001 * df_minus[j] + 1e-5 / x_range[j])
+        q0[j] = (xref[j] - L[j])^2 * (0.001 * df_plus[j] + 1.001 * df_minus[j] + 1e-5 / x_range[j])
+        for i in 1:prob.m
+            p[i, j] = (U[j] - xref[j])^2 * (1.001 * dg_plus[i, j] + 0.001 * dg_minus[i, j] + 1e-5 / x_range[j])
+            q[i, j] = (xref[j] - L[j])^2 * (0.001 * dg_plus[i, j] + 1.001 * dg_minus[i, j] + 1e-5 / x_range[j])
+            r[i] -= p[i, j] / (U[j] - xref[j]) + q[i, j] / (xref[j] - L[j])
+        end
     end
 end

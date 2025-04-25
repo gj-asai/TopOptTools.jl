@@ -114,7 +114,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
     end
 
     # Run optimization
-    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-5)
+    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-5, asydecr=0.3, asyincr=1.1)
     x = try
         @info "Starting optimization with p = $(model.mat_interp.penal)"
         sol = MMA.optimize(x0, obj, cons; post, opts)

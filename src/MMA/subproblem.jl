@@ -39,7 +39,7 @@ function update_kkt_residuals!(problem::MMAProblem)
     @unpack a0, a, c, d = artificial
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
 
-    g = sum(p ./ (U .- x)' .+ q ./ (x .- L)', dims=2) |> vec
+    g = sum(@.(p / (U - x)' + q / (x - L)'), dims=2) |> vec
     pλ = p0 .+ p' * λ
     qλ = q0 .+ q' * λ
 
@@ -64,7 +64,7 @@ function newton_direction(problem::MMAProblem)
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
     @unpack a0, a, c, d = artificial
 
-    g = sum(p ./ (U .- x)' .+ q ./ (x .- L)', dims=2) |> vec
+    g = sum(@.(p / (U - x)' + q / (x - L)'), dims=2) |> vec
     pλ = p0 .+ p' * λ
     qλ = q0 .+ q' * λ
 
