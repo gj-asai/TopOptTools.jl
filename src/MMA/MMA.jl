@@ -4,6 +4,7 @@ module MMA
 
 using UnPack,
     LinearAlgebra,
+    OhMyThreads,
     TimerOutputs
 
 using ..TopOpt

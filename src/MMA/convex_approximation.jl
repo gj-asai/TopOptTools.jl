@@ -4,24 +4,29 @@ function update_asymptotes!(prob::MMAProblem)
     x = prob.state.x
     x_range = x.lim_sup - x.lim_inf
 
-    if it < 3
-        @. L = x - asyinit * x_range
-        @. U = x + asyinit * x_range
-    else
-        variation = @. (x - xprev1) * (xprev1 - xprev2)
-        γ = ones(prob.n)
-        @. γ[variation<0] = asydecr
-        @. γ[variation>0] = asyincr
+    @tasks for j in 1:prob.n
+        if it < 3
+            L[j] = x[j] - asyinit * x_range[j]
+            U[j] = x[j] + asyinit * x_range[j]
+        else
+            γ = 1.0
+            variation = (x[j] - xprev1[j]) * (xprev1[j] - xprev2[j])
+            if variation < 0
+                γ = asydecr
+            elseif variation > 0
+                γ = asyincr
+            end
 
-        @. L = x - γ * (xprev1 - L)
-        @. U = x + γ * (U - xprev1)
+            L[j] = x[j] - γ * (xprev1[j] - L[j])
+            U[j] = x[j] + γ * (U[j] - xprev1[j])
 
-        @. L = max(x - 10 * x_range, min(L, x - 0.01 * x_range))
-        @. U = max(x + 0.01 * x_range, min(U, x + 10 * x_range))
+            L[j] = max(x[j] - 10 * x_range[j], min(L[j], x[j] - 0.01 * x_range[j]))
+            U[j] = max(x[j] + 0.01 * x_range[j], min(U[j], x[j] + 10 * x_range[j]))
+        end
+
+        α[j] = max(x.lim_inf[j], L[j] + 0.1 * (x[j] - L[j]), x[j] - move * x_range[j])
+        β[j] = min(x.lim_sup[j], U[j] - 0.1 * (U[j] - x[j]), x[j] + move * x_range[j])
     end
-
-    @. α = max(x.lim_inf, L + 0.1 * (x - L), x - move * x_range)
-    @. β = min(x.lim_sup, U - 0.1 * (U - x), x + move * x_range)
 end
 
 function update_convex_approximation!(prob::MMAProblem)
@@ -38,14 +43,16 @@ function update_convex_approximation!(prob::MMAProblem)
     dg_plus = max.(cur_dcons, 0)
     dg_minus = max.(-cur_dcons, 0)
 
-    r .= cur_cons
-    for j in 1:prob.n
+    @tasks for j in 1:prob.n
         p0[j] = (U[j] - xref[j])^2 * (1.001 * df_plus[j] + 0.001 * df_minus[j] + 1e-5 / x_range[j])
         q0[j] = (xref[j] - L[j])^2 * (0.001 * df_plus[j] + 1.001 * df_minus[j] + 1e-5 / x_range[j])
         for i in 1:prob.m
             p[i, j] = (U[j] - xref[j])^2 * (1.001 * dg_plus[i, j] + 0.001 * dg_minus[i, j] + 1e-5 / x_range[j])
             q[i, j] = (xref[j] - L[j])^2 * (0.001 * dg_plus[i, j] + 1.001 * dg_minus[i, j] + 1e-5 / x_range[j])
-            r[i] -= p[i, j] / (U[j] - xref[j]) + q[i, j] / (xref[j] - L[j])
         end
+    end
+
+    for i in 1:prob.m
+        r[i] = cur_cons[i] - treduce(+, collect(p[i, j] / (U[j] - xref[j]) + q[i, j] / (xref[j] - L[j]) for j in 1:prob.n))
     end
 end
