@@ -1,4 +1,6 @@
 abstract type MaterialInterpolation{nvar,T<:Real} end
+interpolate(::AbstractVector, interp::MaterialInterpolation) = throw("Method TopOpt.interpolate(::AbstractVector, ::$(typeof(interp))) is not defined")
+rotate_stress(::SymmetricTensor{2}, ::AbstractVector, interp::MaterialInterpolation) = throw("Method TopOpt.rotate_stress(::SymmetricTensor{2}, ::AbstractVector, ::$(typeof(interp))) is not defined")
 
 struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},BT<:BallTree,CV<:CellValues,FV<:FacetValues}
     grid::G

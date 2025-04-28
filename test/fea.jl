@@ -1,7 +1,32 @@
 # all expected values from
 # https://www.topopt.mek.dtu.dk/apps-and-software/topology-optimization-codes-written-in-python
 
-using Ferrite
+using Ferrite, UnPack
+
+struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
+    mat::Material{dim,T,CT}
+    penal::T
+end
+
+function TopOpt.interpolate(xe::AbstractVector, interp::SIMP)
+    ρ = xe[1]
+    return ρ^interp.penal * interp.mat.C
+end
+
+function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+    @unpack K, u = results
+    return u' * K * u
+end
+
+function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+    @unpack u, ∂Ke∂x = results
+    dcdx = zeros(length(∂Ke∂x))
+    for cell in CellIterator(model.dh)
+        ue = u[celldofs(cell)]
+        dcdx[cellid(cell)] = -ue' * ∂Ke∂x[cellid(cell)] * ue
+    end
+    return dcdx
+end
 
 @testset "Element stiffness" begin
     # generate a mesh with a single element
@@ -98,112 +123,5 @@ end
 
     @test results.u ≈ expected_u[dof_order]
     @test comp ≈ expected_comp
-    @test dcompliance(x, results, model) ≈ dcdx_fd atol = 1e-4
-end
-
-@testset "SOMP AD" begin
-    # 5x3 mbb
-    grid = generate_grid(Quadrilateral, (5, 3), Vec((0.0, 0.0)), Vec((5.0, 3.0)))
-    addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
-    addnodeset!(grid, "support", x -> x[1] ≈ 5.0 && x[2] ≈ 0.0) # bottom right corner
-    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 3.0) # top left corner
-
-    # FE model
-    model = FEModel(
-        grid=grid,
-        ip=Lagrange{RefQuadrilateral,1}(), # linear elements
-        qr=QuadratureRule{RefQuadrilateral}(2), # 2 point quadrature
-        mat_interp=SOMP(Orthotropic2D(El=2.0, Et=1.0, nult=0.3, Glt=1.0), 3.0),
-        constraints=[
-            Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> 0.0, [1]), # block x displacement
-            Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
-        ],
-        loads=[
-            TopOpt.NodalLoad("force", (0.0, -1.0)),
-        ],
-    )
-    x = DesignVariables(2)
-    foreach(1:15) do _
-        push!(x, 0.5, 1e-3, 1.0)
-        push!(x, deg2rad(45), -π, π)
-    end
-
-    results = FEResults(model)
-    fea!(results, x, model)
-    dcdx = dcompliance(x, results, model)
-
-    # derivative of the compliance via finite differences
-    delta = 1e-6
-    dcdx_fd = zeros(30)
-    for i in eachindex(x)
-        x_left = copy(x)
-        x_left[i] -= delta
-        fea!(results, x_left, model)
-        comp_left = compliance(x_left, results, model)
-
-        x_right = copy(x)
-        x_right[i] += delta
-        fea!(results, x_right, model)
-        comp_right = compliance(x_right, results, model)
-
-        dcdx_fd[i] = (comp_right - comp_left) / 2delta
-    end
-
-    @test dcompliance(x, results, model) ≈ dcdx_fd atol = 1e-3
-end
-
-@testset "MMSOMP AD" begin
-    # 5x3 mbb
-    grid = generate_grid(Quadrilateral, (5, 3), Vec((0.0, 0.0)), Vec((5.0, 3.0)))
-    addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
-    addnodeset!(grid, "support", x -> x[1] ≈ 5.0 && x[2] ≈ 0.0) # bottom right corner
-    addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ 3.0) # top left corner
-
-    # FE model
-    model = FEModel(
-        grid=grid,
-        ip=Lagrange{RefQuadrilateral,1}(), # linear elements
-        qr=QuadratureRule{RefQuadrilateral}(2), # 2 point quadrature
-        mat_interp=MMSOMP(
-            [
-                Orthotropic2D(El=2.0, Et=1.0, nult=0.3, Glt=1.0),
-                Orthotropic2D(El=20.0, Et=1.0, nult=0.3, Glt=1.0),
-            ], 3.0),
-        constraints=[
-            Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> 0.0, [1]), # block x displacement
-            Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
-        ],
-        loads=[
-            TopOpt.NodalLoad("force", (0.0, -1.0)),
-        ],
-    )
-    x = DesignVariables(3)
-    foreach(1:15) do _
-        push!(x, 0.2, 1e-3, 1.0)
-        push!(x, 0.3, 1e-3, 1.0)
-        push!(x, deg2rad(45), -π, π)
-    end
-
-    results = FEResults(model)
-    fea!(results, x, model)
-    dcdx = dcompliance(x, results, model)
-
-    # derivative of the compliance via finite differences
-    delta = 1e-6
-    dcdx_fd = zeros(45)
-    for i in eachindex(x)
-        x_left = copy(x)
-        x_left[i] -= delta
-        fea!(results, x_left, model)
-        comp_left = compliance(x_left, results, model)
-
-        x_right = copy(x)
-        x_right[i] += delta
-        fea!(results, x_right, model)
-        comp_right = compliance(x_right, results, model)
-
-        dcdx_fd[i] = (comp_right - comp_left) / 2delta
-    end
-
     @test dcompliance(x, results, model) ≈ dcdx_fd atol = 1e-4
 end

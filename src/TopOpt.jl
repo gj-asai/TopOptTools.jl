@@ -13,16 +13,12 @@ using Ferrite,
     UnPack,
     TimerOutputs
 
-export Isotropic2D, Orthotropic2D, Orthotropic3D,
-    SIMP, SOMP, MMSOMP,
+export Material, Isotropic2D, Orthotropic2D, Orthotropic3D,
     NodalLoad, LinearLoad,
-    FEModel,
+    MaterialInterpolation, FEModel,
     DesignVariables, MMA,
     FEResults, fea!, stress,
-    ConvolutionFilter, filter!,
-    compliance, dcompliance,
-    impact, dimpact,
-    volume, dvolume
+    ConvolutionFilter, filter!
 
 const timer = TimerOutput()
 
@@ -37,8 +33,5 @@ include("fea.jl")
 # Optimization
 include("MMA/MMA.jl")
 include("filters.jl")
-include("interpolations/simp.jl")
-include("interpolations/somp.jl")
-include("interpolations/mmsomp.jl")
 
 end # module TopOpt

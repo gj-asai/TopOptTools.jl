@@ -2,8 +2,42 @@ using Ferrite, FerriteGmsh
 using TimerOutputs
 using WriteVTK, JLD2
 using Printf
+using UnPack
 
 using TopOpt
+
+struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
+    mat::Material{dim,T,CT}
+    penal::T
+end
+
+function TopOpt.interpolate(xe::AbstractVector, interp::SIMP)
+    ρ = xe[1]
+    return ρ^interp.penal * interp.mat.C
+end
+
+function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+    @unpack K, u = results
+    return u' * K * u
+end
+
+function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+    @unpack u, ∂Ke∂x = results
+    dcdx = zeros(length(∂Ke∂x))
+    for cell in CellIterator(model.dh)
+        ue = u[celldofs(cell)]
+        dcdx[cellid(cell)] = -ue' * ∂Ke∂x[cellid(cell)] * ue
+    end
+    return dcdx
+end
+
+function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+    return x ⋅ model.elemvol / sum(model.elemvol)
+end
+
+function dvolume(_, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+    return model.elemvol / sum(model.elemvol)
+end
 
 function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_partial=false)
     @info "SIMP with volfrac=$volfrac, rρ=$rρ"
@@ -71,7 +105,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
     obj = MMA.Objective(objective, dobjective)
 
     # Constraint: max volume fraction
-    constraint(x) = TopOpt.volume(x, results, model) / volfrac - 1
+    constraint(x) = volume(x, results, model) / volfrac - 1
     dconstraint(x) = dvolume(x, results, model) / volfrac
     cons = MMA.Constraints(constraint, dconstraint)
 
@@ -118,18 +152,10 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
     x = try
         @info "Starting optimization with p = $(model.mat_interp.penal)"
         sol = MMA.optimize(x0, obj, cons; post, opts)
-        x = sol.x
-
-        # Evaluate final design
-        model.mat_interp.penal = 3.0
-        fea!(results, x, model)
-        history[:final_compliance] = TopOpt.compliance(x, results, model)
-        @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
-        x
+        sol.x
     catch e
         @warn "Computation interrupted - $(typeof(e))"
-        history[:final_compliance] = NaN
-        x = history[:final_x]
+        history[:final_x]
     end
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 

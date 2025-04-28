@@ -2,8 +2,53 @@ using Ferrite, FerriteGmsh
 using TimerOutputs
 using WriteVTK, JLD2
 using Printf
+using UnPack
 
 using TopOpt
+
+mutable struct SOMP{dim,T<:Real,CT} <: MaterialInterpolation{2,T}
+    mat::Material{dim,T,CT}
+    penal::T
+end
+
+function TopOpt.interpolate(xe::AbstractVector, interp::SOMP)
+    ρ, θ = xe
+    return ρ^interp.penal * rotate(interp.mat.C, θ)
+end
+
+function TopOpt.rotate_stress(global_stress::SymmetricTensor{2}, xe::AbstractVector, ::SOMP)
+    θ = xe[2]
+    return rotate(global_stress, -θ)
+end
+
+function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+    @unpack K, u = results
+    return u' * K * u
+end
+
+function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+    @unpack u, ∂Ke∂x = results
+    dcdx = zeros(T, length(∂Ke∂x))
+    for cell in CellIterator(model.dh)
+        ue = u[celldofs(cell)]
+        e = cellid(cell)
+        for i in 1:nvar
+            dcdx[nvar*(e-1)+i] = -ue' * ∂Ke∂x[nvar*(e-1)+i] * ue
+        end
+    end
+    return dcdx
+end
+
+function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+    ρ = @view x[1:2:end]
+    return ρ ⋅ model.elemvol / sum(model.elemvol)
+end
+
+function dvolume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+    ∂g∂x = zeros(T, length(x))
+    ∂g∂x[1:2:end] .= model.elemvol / sum(model.elemvol)
+    return ∂g∂x
+end
 
 function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=nothing, save_partial=false)
     @info "SOMP with volfrac=$volfrac, rρ=$rρ, rθ=$rθ, angle=$angle"
@@ -77,7 +122,7 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
     obj = MMA.Objective(objective, dobjective)
 
     # Constraint: max volume fraction
-    constraint(x) = TopOpt.volume(x, results, model) / volfrac - 1
+    constraint(x) = volume(x, results, model) / volfrac - 1
     dconstraint(x) = dvolume(x, results, model) / volfrac
     cons = MMA.Constraints(constraint, dconstraint)
 
@@ -89,7 +134,6 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
         :final_x => Float64[],
         :final_u => Float64[],
         :compliance => Float64[],
-        :impact => Float64[],
         :penal => Float64[],
         :objective => Float64[],
         :constraint => Vector{Float64}[],
@@ -100,13 +144,11 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
 
         x = mma_state.x
         comp = compliance(x, results, model)
-        CO2 = impact(x, results, model)
 
         # Push to history
         history[:final_x] = mma_state.x
         history[:final_u] = results.u
         push!(history[:compliance], comp)
-        push!(history[:impact], CO2)
         push!(history[:penal], mat_interp.penal)
         push!(history[:objective], mma_state.cur_obj)
         push!(history[:constraint], mma_state.cur_cons)
@@ -140,7 +182,7 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
         # Evaluate final design
         model.mat_interp.penal = 3.0
         fea!(results, x, model)
-        history[:final_compliance] = TopOpt.compliance(x, results, model)
+        history[:final_compliance] = compliance(x, results, model)
         @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
         x
     catch e

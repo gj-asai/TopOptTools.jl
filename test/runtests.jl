@@ -6,7 +6,6 @@ using TopOpt
     include("fea.jl")
     include("filters.jl")
     include("mma.jl")
-    include("simp.jl")
 end
 
 nothing
