@@ -30,7 +30,7 @@ function TopOpt.interpolate(xe::AbstractVector{T}, interp::MMSOMP{dim}) where {T
     return result
 end
 rotate_mmsomp(mat::Material{2}, θ::T) where {T<:Real} = rotate(mat.C, θ)
-rotate_mmsomp(mat::Material{3}, θ::T) where {T<:Real} = rotate(mat.C, Vec{3}((0.,0.,1.)), θ)
+rotate_mmsomp(mat::Material{3}, θ::T) where {T<:Real} = rotate(mat.C, Vec{3}((0.0, 0.0, 1.0)), θ)
 
 function TopOpt.rotate_stress(global_stress::SymmetricTensor{2}, xe::AbstractVector, ::MMSOMP)
     θ = xe[end]
@@ -157,12 +157,7 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
     @info @sprintf "Normalization factors: compliance => %.4f, CO2 => %.4f" comp_ini CO2_ini
 
     # Objective function: (1-w).compliance/c_0 + w.impact/CO2_0
-    function objective(x)
-        @views TopOpt.filter!(x[nmaterials+1:nvar:end], orientation_filter)
-        fea!(results, x, model)
-
-        return (1 - wimpact) * compliance(x, results, model) / comp_ini + wimpact * impact(x, results, model) / CO2_ini
-    end
+    objective(x) = (1 - wimpact) * compliance(x, results, model) / comp_ini + wimpact * impact(x, results, model) / CO2_ini
     function dobjective(x)
         dcdx = dcompliance(x, results, model)
         dCO2dx = dimpact(x, results, model)
@@ -182,10 +177,6 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
     dconstraint(x) = dvolume(x, results, model) / volfrac
     cons = MMA.Constraints(constraint, dconstraint)
 
-    # After each iteration:
-    # - Print current state
-    # - Save current state to history dictionary
-    # - Apply continuation
     history = Dict(
         :final_x => Float64[],
         :final_u => Float64[],
@@ -197,62 +188,73 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         :volfracs => Vector{Float64}[],
         :final_compliance => 0,
     )
-    function post(mma_state)
-        x = mma_state.x
 
-        comp = compliance(x, results, model)
-        CO2 = impact(x, results, model)
-        volfracs = Float64[]
-        for i = 1:nmaterials
-            push!(volfracs, x[i:nvar:end] ⋅ model.elemvol / sum(model.elemvol))
-        end
+    x = try
+        # initialize optimization
+        @info "Starting optimization with p = $(model.mat_interp.penal)"
+        mma = MMA.MMAProblem(x0, obj, cons, move=0.5, asyinit=0.1, asydecr=0.5, asyincr=1.1)
+        fea!(results, mma.state.x, model)
 
-        formatted_volfracs = join([@sprintf("%5.2f", 100 * f) for f in volfracs], ", ")
-        @info @sprintf "It = %4d | obj = %8.4f | c = %10.4f | CO2 = %8.4f | volfracs = [%s] %%" mma_state.it mma_state.cur_obj comp CO2 formatted_volfracs
+        inner_it = 0
+        for _ in 1:maxiter
+            # iterate and smooth result before saving
+            MMA.iterate(mma)
+            @views TopOpt.filter!(mma.state.x[nmaterials+1:nvar:end], orientation_filter)
+            fea!(results, mma.state.x, model)
+            inner_it += 1
 
-        # Push to history
-        history[:final_x] = x
-        history[:final_u] = results.u
-        push!(history[:compliance], comp)
-        push!(history[:impact], CO2)
-        push!(history[:penal], mat_interp.penal)
-        push!(history[:objective], mma_state.cur_obj)
-        push!(history[:constraint], mma_state.cur_cons)
-        push!(history[:volfracs], volfracs)
-
-        # Save iteration
-        !isnothing(filename) && save_partial && @timeit "export" begin
-                i = length(history[:compliance]) - 1
-                filename_i = @sprintf "%s.%4.4d.vtu" filename i
-                VTKGridFile(filename_i, grid) do vtk
-                    write_cell_data(vtk, @view(x[1:3:end]), "carbon")
-                    write_cell_data(vtk, @view(x[2:3:end]), "bamboo")
-                    write_cell_data(vtk, @view(x[3:3:end]), "theta")
-                    pvd[i] = vtk
-                end
+            # individual objectives, not expensive because uses the FEA results already calculated
+            comp = compliance(mma.state.x, results, model)
+            CO2 = impact(mma.state.x, results, model)
+            volfracs = Float64[]
+            for i = 1:nmaterials
+                push!(volfracs, mma.state.x[i:nvar:end] ⋅ model.elemvol / sum(model.elemvol))
             end
 
-        # Continuation up to p = 3
-        Δfrel = MMA.relative_change(mma_state)
-        if Δfrel < 5e-4 && model.mat_interp.penal < 3.0
-            model.mat_interp.penal += 1.0
-            @info "Updated p to $(model.mat_interp.penal)"
-        end
-    end
+            # log iteration
+            Δf = MMA.relative_change(mma.state, window=10)
+            formatted_volfracs = join([@sprintf("%5.2f", 100 * f) for f in volfracs], ", ")
+            @info @sprintf "It = %4d | obj = %8.4f | Δobj = %8.2e | c = %10.4f | CO2 = %8.4f | volfracs = [%s] %%" mma.state.it mma.state.cur_obj Δf comp CO2 formatted_volfracs
 
-    # Run optimization
-    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-5, asydecr=0.3, asyincr=1.1)
-    x = try
-        @info "Starting optimization with p = $(model.mat_interp.penal)"
-        sol = MMA.optimize(x0, obj, cons; post, opts)
-        x = sol.x
+            # Push to history
+            history[:final_x] = mma.state.x
+            history[:final_u] = results.u
+            push!(history[:compliance], comp)
+            push!(history[:impact], CO2)
+            push!(history[:penal], mat_interp.penal)
+            push!(history[:objective], mma.state.cur_obj)
+            push!(history[:constraint], mma.state.cur_cons)
+            push!(history[:volfracs], volfracs)
+
+            # Save iteration
+            !isnothing(filename) && save_partial && @timeit "export" begin
+                    filename_i = @sprintf "%s.%4.4d.vtu" filename mma.state.it
+                    VTKGridFile(filename_i, grid) do vtk
+                        write_cell_data(vtk, @view(mma.state.x[1:3:end]), "carbon")
+                        write_cell_data(vtk, @view(mma.state.x[2:3:end]), "bamboo")
+                        write_cell_data(vtk, @view(mma.state.x[3:3:end]), "theta")
+                        pvd[mma.state.it] = vtk
+                    end
+                end
+
+            # Apply continuation
+            if inner_it >= 20 && Δf < 1e-4
+                # if at max p, stop the optimization
+                model.mat_interp.penal == 5.0 && break
+                # else, increase p
+                model.mat_interp.penal += 1.0
+                @info "Updated p to $(model.mat_interp.penal)"
+                fea!(results, mma.state.x, model)
+                inner_it = 0
+            end
+        end
 
         # Evaluate final design
         model.mat_interp.penal = 3.0
-        fea!(results, x, model)
-        history[:final_compliance] = compliance(x, results, model)
+        fea!(results, mma.state.x, model)
+        history[:final_compliance] = compliance(mma.state.x, results, model)
         @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
-        x
+        mma.state.x
     catch e
         @warn "Computation interrupted - $(typeof(e))"
         history[:final_compliance] = NaN

@@ -1,18 +1,58 @@
-function reset_primal_dual!(problem::MMAProblem)
-    @unpack α, β = problem.approx
-    c = problem.artificial.c
-    state = problem.primal_dual
+mutable struct PrimalDualState{T<:Real}
+    ε::T
+    x::Vector{T}
+    y::Vector{T}
+    z::T
+    λ::Vector{T}
+    ξ::Vector{T}
+    η::Vector{T}
+    μ::Vector{T}
+    ζ::T
+    s::Vector{T}
+end
+PrimalDualState(n::Int, m::Int, ::Type{T}) where {T} = PrimalDualState(
+    zero(T),
+    Vector{T}(undef, n),
+    Vector{T}(undef, m),
+    zero(T),
+    Vector{T}(undef, m),
+    Vector{T}(undef, n),
+    Vector{T}(undef, n),
+    Vector{T}(undef, m),
+    zero(T),
+    Vector{T}(undef, m),
+)
 
-    state.ε = 1.0
-    @. state.x = 0.5 * (α + β)
-    fill!(state.y, 1.0)
-    state.z = 1.0
-    fill!(state.λ, 1.0)
-    @. state.ξ = max(1.0, 1 / (state.x - α))
-    @. state.η = max(1.0, 1 / (β - state.x))
-    @. state.μ = max(1.0, c / 2)
-    state.ζ = 1.0
-    fill!(state.s, 1.0)
+function solve_subproblem!(primal_dual::PrimalDualState, approx::ConvexApproximation, artificial::ArtificialParameters)
+    @unpack L, U, α, β, p0, q0, p, q, r = approx
+
+    reset_primal_dual!(primal_dual, approx, artificial)
+    while primal_dual.ε > 1e-7
+        norm_inf_residual = Inf
+        for _ = 1:200
+            norm_inf_residual < 0.9 * primal_dual.ε && break
+            @timeit TopOpt.timer "newton direction" Δw = newton_direction(primal_dual, approx, artificial)
+            @timeit TopOpt.timer "step" new_residual = step_primal_dual!(primal_dual, approx, artificial, Δw)
+            norm_inf_residual = norm(new_residual, Inf)
+        end
+        primal_dual.ε *= 0.1
+    end
+end
+
+function reset_primal_dual!(primal_dual::PrimalDualState, approx::ConvexApproximation, artificial::ArtificialParameters)
+    @unpack α, β = approx
+    c = artificial.c
+
+    primal_dual.ε = 1.0
+    @. primal_dual.x = 0.5 * (α + β)
+    fill!(primal_dual.y, 1.0)
+    primal_dual.z = 1.0
+    fill!(primal_dual.λ, 1.0)
+    @. primal_dual.ξ = max(1.0, 1 / (primal_dual.x - α))
+    @. primal_dual.η = max(1.0, 1 / (β - primal_dual.x))
+    @. primal_dual.μ = max(1.0, c / 2)
+    primal_dual.ζ = 1.0
+    fill!(primal_dual.s, 1.0)
 
     nothing
 end
@@ -33,9 +73,8 @@ function move_primal_dual!(state::PrimalDualState, step, direction)
     nothing
 end
 
-function update_kkt_residuals!(problem::MMAProblem)
-    @unpack approx, artificial, primal_dual, residuals, m, n = problem
-    @unpack L, U, α, β, p0, q0, p, q, r = approx
+function update_kkt_residuals!(residuals, primal_dual::PrimalDualState, approx::ConvexApproximation, artificial::ArtificialParameters)
+    @unpack L, U, α, β, p0, q0, p, q, r, m, n = approx
     @unpack a0, a, c, d = artificial
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
 
@@ -58,8 +97,7 @@ function update_kkt_residuals!(problem::MMAProblem)
     nothing
 end
 
-function newton_direction(problem::MMAProblem)
-    @unpack approx, primal_dual, artificial = problem
+function newton_direction(primal_dual::PrimalDualState, approx::ConvexApproximation, artificial::ArtificialParameters)
     @unpack L, U, α, β, p0, q0, p, q, r = approx
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
     @unpack a0, a, c, d = artificial
@@ -101,9 +139,9 @@ function newton_direction(problem::MMAProblem)
     return Δx, Δy, Δz, Δλ, Δξ, Δη, Δμ, Δζ, Δs
 end
 
-function step_primal_dual!(problem::MMAProblem, Δw)
-    @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = problem.primal_dual
-    @unpack α, β = problem.approx
+function step_primal_dual!(primal_dual::PrimalDualState{T}, approx::ConvexApproximation, artificial::ArtificialParameters, Δw) where {T}
+    @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
+    @unpack α, β, n, m = approx
     Δx, Δy, Δz, Δλ, Δξ, Δη, Δμ, Δζ, Δs = Δw
 
     tα = maximum(@. -1.01 * Δx / (x - α))
@@ -118,19 +156,21 @@ function step_primal_dual!(problem::MMAProblem, Δw)
     ts = maximum(@. -1.01 * Δs / s)
     t = 1.0 / max(tα, tβ, ty, tz, tλ, tξ, tη, tμ, tζ, ts, 1.0)
 
-    update_kkt_residuals!(problem)
-    norm_initial_residual = norm(problem.residuals)
+    residuals = Vector{T}(undef, 3n + 4m + 2)
 
-    move_primal_dual!(problem.primal_dual, t, Δw)
-    update_kkt_residuals!(problem)
+    update_kkt_residuals!(residuals, primal_dual, approx, artificial)
+    norm_initial_residual = norm(residuals)
+
+    move_primal_dual!(primal_dual, t, Δw)
+    update_kkt_residuals!(residuals, primal_dual, approx, artificial)
     for _ = 1:50
-        norm(problem.residuals) < norm_initial_residual && break
+        norm(residuals) < norm_initial_residual && break
 
         # if residual increased, walk half way back
         t /= 2
-        move_primal_dual!(problem.primal_dual, -t, Δw)
-        update_kkt_residuals!(problem)
+        move_primal_dual!(primal_dual, -t, Δw)
+        update_kkt_residuals!(residuals, primal_dual, approx, artificial)
     end
 
-    nothing
+    return residuals
 end

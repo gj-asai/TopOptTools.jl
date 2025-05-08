@@ -63,7 +63,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
         # FE model
         ip = Lagrange{RefQuadrilateral,1}() # linear elements
         qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
-        model = TopOpt.FEModel(
+        model = FEModel(
             grid=grid,
             ip=ip,
             qr=qr,
@@ -109,10 +109,6 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
     dconstraint(x) = dvolume(x, results, model) / volfrac
     cons = MMA.Constraints(constraint, dconstraint)
 
-    # After each iteration:
-    # - Print current state
-    # - Save current state to history dictionary
-    # - Apply continuation
     history = Dict(
         :final_x => Float64[],
         :final_u => Float64[],
@@ -122,37 +118,43 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
         :constraint => Vector{Float64}[],
         :final_compliance => 0,
     )
-    function post(mma_state)
-        @info @sprintf "It = %4d | c = %10.4f" mma_state.it mma_state.cur_obj
 
-        # Push to history
-        x = mma_state.x
-        comp = compliance(x, results, model)
-
-        history[:final_x] = x
-        history[:final_u] = results.u
-        push!(history[:compliance], comp)
-        push!(history[:penal], mat_interp.penal)
-        push!(history[:objective], mma_state.cur_obj)
-        push!(history[:constraint], mma_state.cur_cons)
-
-        # Save iteration
-        !isnothing(filename) && save_partial && @timeit "export" begin
-                i = length(history[:compliance]) - 1
-                filename_i = @sprintf "%s.%4.4d.vtu" filename i
-                VTKGridFile(filename_i, grid) do vtk
-                    write_cell_data(vtk, x, "carbon")
-                    pvd[i] = vtk
-                end
-            end
-    end
-
-    # Run optimization
-    opts = MMA.OptimOpts(maxiter=maxiter, reltol=1e-5, asydecr=0.3, asyincr=1.1)
     x = try
+        # initialize optimization
         @info "Starting optimization with p = $(model.mat_interp.penal)"
-        sol = MMA.optimize(x0, obj, cons; post, opts)
-        sol.x
+        mma = MMA.MMAProblem(x0, obj, cons)
+        fea!(results, mma.state.x, model)
+
+        for _ in 1:maxiter
+            MMA.iterate(mma)
+            fea!(results, mma.state.x, model)
+
+            x = mma.state.x
+            @info @sprintf "It = %4d | c = %10.4f" mma.state.it mma.state.cur_obj
+            comp = compliance(x, results, model)
+
+            # Push to history
+            history[:final_x] = x
+            history[:final_u] = results.u
+            push!(history[:compliance], comp)
+            push!(history[:penal], mat_interp.penal)
+            push!(history[:objective], mma.state.cur_obj)
+            push!(history[:constraint], mma.state.cur_cons)
+
+            # Save iteration
+            !isnothing(filename) && save_partial && @timeit "export" begin
+                    i = length(history[:compliance]) - 1
+                    filename_i = @sprintf "%s.%4.4d.vtu" filename i
+                    VTKGridFile(filename_i, grid) do vtk
+                        write_cell_data(vtk, x, "carbon")
+                        pvd[i] = vtk
+                    end
+                end
+
+            MMA.relative_change(mma.state) < 1e-5 && break
+        end
+
+        mma.state.x
     catch e
         @warn "Computation interrupted - $(typeof(e))"
         history[:final_x]

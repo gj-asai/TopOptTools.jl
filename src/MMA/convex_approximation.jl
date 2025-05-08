@@ -1,10 +1,47 @@
-function update_asymptotes!(prob::MMAProblem)
-    @unpack L, U, α, β, move, asyinit, asydecr, asyincr = prob.approx
-    @unpack it, xprev1, xprev2 = prob.state
-    x = prob.state.x
+struct ConvexApproximation{T<:Real}
+    # problem dimensions
+    n::Int
+    m::Int
+
+    # asymptote move limits
+    move::T
+    asyinit::T
+    asydecr::T
+    asyincr::T
+
+    # asymptotes and variable limits
+    L::Vector{T}
+    U::Vector{T}
+    α::Vector{T}
+    β::Vector{T}
+
+    # approximation coefficients
+    p0::Vector{T}
+    q0::Vector{T}
+    p::Matrix{T}
+    q::Matrix{T}
+    r::Vector{T}
+end
+ConvexApproximation(n::Int, m::Int, move::T, asyinit::T, asydecr::T, asyincr::T) where {T<:Real} = ConvexApproximation(
+    n, m, move, asyinit, asydecr, asyincr,
+    Vector{T}(undef, n), # L
+    Vector{T}(undef, n), # U
+    Vector{T}(undef, n), # α
+    Vector{T}(undef, n), # β
+    Vector{T}(undef, n), # p0
+    Vector{T}(undef, n), # q0
+    Matrix{T}(undef, m, n), # p
+    Matrix{T}(undef, m, n), # q
+    Vector{T}(undef, m), # r
+)
+
+function update_asymptotes!(approx::ConvexApproximation, state::MMAState)
+    @unpack L, U, α, β, move, asyinit, asydecr, asyincr, n = approx
+    @unpack it, xprev1, xprev2 = state
+    x = state.x
     x_range = x.lim_sup - x.lim_inf
 
-    @tasks for j in 1:prob.n
+    @tasks for j in 1:n
         if it < 3
             L[j] = x[j] - asyinit * x_range[j]
             U[j] = x[j] + asyinit * x_range[j]
@@ -29,12 +66,12 @@ function update_asymptotes!(prob::MMAProblem)
     end
 end
 
-function update_convex_approximation!(prob::MMAProblem)
-    update_asymptotes!(prob)
+function update_convex_approximation!(approx::ConvexApproximation, state::MMAState)
+    update_asymptotes!(approx, state)
 
-    @unpack cur_dobj, cur_cons, cur_dcons = prob.state
-    @unpack L, U, p0, q0, p, q, r = prob.approx
-    xref = prob.state.x
+    @unpack cur_dobj, cur_cons, cur_dcons = state
+    @unpack L, U, p0, q0, p, q, r, n, m = approx
+    xref = state.x
     x_range = xref.lim_sup - xref.lim_inf
 
     df_plus = max.(cur_dobj, 0)
@@ -43,16 +80,16 @@ function update_convex_approximation!(prob::MMAProblem)
     dg_plus = max.(cur_dcons, 0)
     dg_minus = max.(-cur_dcons, 0)
 
-    @tasks for j in 1:prob.n
+    @tasks for j in 1:n
         p0[j] = (U[j] - xref[j])^2 * (1.001 * df_plus[j] + 0.001 * df_minus[j] + 1e-5 / x_range[j])
         q0[j] = (xref[j] - L[j])^2 * (0.001 * df_plus[j] + 1.001 * df_minus[j] + 1e-5 / x_range[j])
-        for i in 1:prob.m
+        for i in 1:m
             p[i, j] = (U[j] - xref[j])^2 * (1.001 * dg_plus[i, j] + 0.001 * dg_minus[i, j] + 1e-5 / x_range[j])
             q[i, j] = (xref[j] - L[j])^2 * (0.001 * dg_plus[i, j] + 1.001 * dg_minus[i, j] + 1e-5 / x_range[j])
         end
     end
 
-    for i in 1:prob.m
-        r[i] = cur_cons[i] - treduce(+, collect(p[i, j] / (U[j] - xref[j]) + q[i, j] / (xref[j] - L[j]) for j in 1:prob.n))
+    for i in 1:m
+        r[i] = cur_cons[i] - treduce(+, collect(p[i, j] / (U[j] - xref[j]) + q[i, j] / (xref[j] - L[j]) for j in 1:n))
     end
 end
