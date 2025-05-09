@@ -29,8 +29,8 @@ function TopOpt.interpolate(xe::AbstractVector{T}, interp::MMSOMP{dim}) where {T
     result += TopOpt.void(Val(dim)).C
     return result
 end
-rotate_mmsomp(mat::Material{2}, θ::T) where {T<:Real} = rotate(mat.C, θ)
-rotate_mmsomp(mat::Material{3}, θ::T) where {T<:Real} = rotate(mat.C, Vec{3}((0.0, 0.0, 1.0)), θ)
+rotate_mmsomp(mat::Material{2}, θ) = rotate(mat.C, θ)
+rotate_mmsomp(mat::Material{3}, θ) = rotate(mat.C, Vec{3}((0.0, 0.0, 1.0)), θ)
 
 function TopOpt.rotate_stress(global_stress::SymmetricTensor{2}, xe::AbstractVector, ::MMSOMP)
     θ = xe[end]
@@ -194,6 +194,22 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         @info "Starting optimization with p = $(model.mat_interp.penal)"
         mma = MMA.MMAProblem(x0, obj, cons, move=0.5, asyinit=0.1, asydecr=0.5, asyincr=1.1)
         fea!(results, mma.state.x, model)
+
+        comp = compliance(mma.state.x, results, model)
+        CO2 = impact(mma.state.x, results, model)
+        volfracs = Float64[]
+        for i = 1:nmaterials
+            push!(volfracs, mma.state.x[i:nvar:end] ⋅ model.elemvol / sum(model.elemvol))
+        end
+
+        history[:final_x] = mma.state.x
+        history[:final_u] = results.u
+        push!(history[:compliance], comp)
+        push!(history[:impact], CO2)
+        push!(history[:penal], mat_interp.penal)
+        push!(history[:objective], mma.state.cur_obj)
+        push!(history[:constraint], mma.state.cur_cons)
+        push!(history[:volfracs], volfracs)
 
         inner_it = 0
         for _ in 1:maxiter
