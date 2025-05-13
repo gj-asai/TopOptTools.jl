@@ -24,8 +24,8 @@ function iterate(prob::MMAProblem)
     end
 
     @timeit TopOpt.timer "mma" begin
-        @timeit TopOpt.timer "convex approximation" update_convex_approximation!(prob.approx, prob.state)
-        @timeit TopOpt.timer "solve subproblem" solve_subproblem!(prob.primal_dual, prob.approx, prob.artificial)
+        update_convex_approximation!(prob.approx, prob.state)
+        solve_subproblem!(prob.primal_dual, prob.approx, prob.artificial)
 
         # update state
         state = prob.state

@@ -31,8 +31,8 @@ function solve_subproblem!(primal_dual::PrimalDualState, approx::ConvexApproxima
         norm_inf_residual = Inf
         for _ = 1:200
             norm_inf_residual < 0.9 * primal_dual.ε && break
-            @timeit TopOpt.timer "newton direction" Δw = newton_direction(primal_dual, approx, artificial)
-            @timeit TopOpt.timer "step" new_residual = step_primal_dual!(primal_dual, approx, artificial, Δw)
+            Δw = newton_direction(primal_dual, approx, artificial)
+            new_residual = step_primal_dual!(primal_dual, approx, artificial, Δw)
             norm_inf_residual = norm(new_residual, Inf)
         end
         primal_dual.ε *= 0.1
@@ -78,13 +78,16 @@ function update_kkt_residuals!(residuals, primal_dual::PrimalDualState, approx::
     @unpack a0, a, c, d = artificial
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
 
-    g = sum(@.(p / (U - x)' + q / (x - L)'), dims=2) |> vec
-    pλ = p0 .+ p' * λ
-    qλ = q0 .+ q' * λ
+    g = zeros(m)
+    pλ = copy(p0)
+    qλ = copy(q0)
+    @inbounds for i in axes(p, 1), j in axes(p, 2)
+        g[i] += p[i, j] / (U[j] - x[j]) + q[i, j] / (x[j] - L[j])
+        pλ[j] += λ[i] * p[i, j]
+        qλ[j] += λ[i] * q[i, j]
+    end
 
-    ∂ψ = @. pλ / (U - x)^2 - qλ / (x - L)^2
-
-    @. residuals[1:n] = ∂ψ - ξ + η
+    @. residuals[1:n] = pλ / (U - x)^2 - qλ / (x - L)^2 - ξ + η
     @. residuals[n+1:n+m] = c + d * y - λ - μ
     residuals[n+m+1] = a0 - ζ - λ ⋅ a
     @. residuals[n+m+2:n+2m+1] = g - a * z - y + s + r
@@ -98,22 +101,25 @@ function update_kkt_residuals!(residuals, primal_dual::PrimalDualState, approx::
 end
 
 function newton_direction(primal_dual::PrimalDualState, approx::ConvexApproximation, artificial::ArtificialParameters)
-    @unpack L, U, α, β, p0, q0, p, q, r = approx
+    @unpack L, U, α, β, p0, q0, p, q, r, m, n = approx
     @unpack ε, x, y, z, λ, ξ, η, μ, ζ, s = primal_dual
     @unpack a0, a, c, d = artificial
 
-    g = sum(@.(p / (U - x)' + q / (x - L)'), dims=2) |> vec
-    pλ = p0 .+ p' * λ
-    qλ = q0 .+ q' * λ
+    g = zeros(m)
+    pλ = copy(p0)
+    qλ = copy(q0)
+    G = zeros(m, n)
+    @inbounds for i in axes(p, 1), j in axes(p, 2)
+        g[i] += p[i, j] / (U[j] - x[j]) + q[i, j] / (x[j] - L[j])
+        pλ[j] += λ[i] * p[i, j]
+        qλ[j] += λ[i] * q[i, j]
+        G[i, j] = p[i, j] / (U[j] - x[j])^2 - q[i, j] / (x[j] - L[j])^2
+    end
 
-    ∂ψ = @. pλ / (U - x)^2 - qλ / (x - L)^2
-    Ψ = Diagonal(@. 2 * pλ / (U - x)^3 + 2 * qλ / (x - L)^3)
-    G = @. p / (U - x)'^2 - q / (x - L)'^2
-
-    Dx = Ψ + Diagonal(@. ξ / (x - α) + η / (β - x))
+    Dx = Diagonal(@. 2 * pλ / (U - x)^3 + 2 * qλ / (x - L)^3 + ξ / (x - α) + η / (β - x))
     Dy = Diagonal(@. d + μ / y)
     Dλ = Diagonal(s ./ λ)
-    δx_ = @. ∂ψ - ε / (x - α) + ε / (β - x)
+    δx_ = @. pλ / (U - x)^2 - qλ / (x - L)^2 - ε / (x - α) + ε / (β - x)
     δy_ = @. c + d * y - λ - ε / y
     δz_ = a0 - λ ⋅ a - ε / z
     δλ_ = @. g - a * z - y + r + ε / λ
