@@ -8,7 +8,7 @@ using UnPack,
     OhMyThreads,
     TimerOutputs
 
-using ..TopOpt
+using ..TopOpt: DesignVariables, timer
 
 export Objective, Constraints,
     MMAProblem, iterate,

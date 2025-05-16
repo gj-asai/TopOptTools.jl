@@ -19,11 +19,9 @@ function MMAProblem(x0::DesignVariables{T}, obj::Objective, cons::Constraints; m
 end
 
 function iterate(prob::MMAProblem)
-    if prob.state.it == 0
-        reset_timer!(TopOpt.timer)
-    end
+    prob.state.it == 0 && reset_timer!(timer)
 
-    @timeit TopOpt.timer "mma" begin
+    @timeit timer "mma" begin
         update_convex_approximation!(prob.approx, prob.state)
         solve_subproblem!(prob.primal_dual, prob.approx, prob.artificial)
 
