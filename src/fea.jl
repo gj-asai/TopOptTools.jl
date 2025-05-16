@@ -19,12 +19,12 @@ function ScratchData(model::FEModel, K::SparseMatrixCSC)
     return ScratchData(cell_cache, cellvalues, Ke, jac, asm)
 end
 
-struct FEResults{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,MT<:SparseMatrixCSC{T},SD<:ScratchData}
+struct FEResults{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,MT<:SparseMatrixCSC{T},FT<:SparseVector{T},SD<:ScratchData}
     x::VT
     model::FEM
 
     K::MT
-    f::Vector{T}
+    f::FT
     ∂Ke∂x::Vector{Matrix{T}}
     u::Vector{T}
     chnl::Channel{SD}
@@ -120,7 +120,7 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
 end
 
 function compute_force_vector(model::FEModel)
-    f = zeros(ndofs(model.dh))
+    f = spzeros(ndofs(model.dh))
     dim = get_dim(model)
 
     # nodal forces
