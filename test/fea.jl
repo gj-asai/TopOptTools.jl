@@ -13,13 +13,15 @@ function TopOpt.interpolate(xe::AbstractVector, interp::SIMP)
     return ρ^interp.penal * interp.mat.C
 end
 
-function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+function compliance(results::FEResults)
     @unpack K, u = results
     return u' * K * u
 end
 
-function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+function dcompliance(results::FEResults)
     @unpack u, ∂Ke∂x = results
+    model = results.model
+
     dcdx = zeros(length(∂Ke∂x))
     for cell in CellIterator(model.dh)
         ue = u[celldofs(cell)]
@@ -95,13 +97,15 @@ end
         push!(x, 1.0, 1e-3, 1.0)
     end
 
-    results = FEResults(model)
-    fea!(results, x, model)
-    comp = compliance(x, results, model)
-    dcdx = dcompliance(x, results, model)
+    results = FEResults(x, model)
+    fea!(results, x)
 
-    expected_comp = 8.584462644544166
+    comp = compliance(results)
+    dcdx = dcompliance(results)
+    u = copy(results.u)
+
     expected_u = [0.00000000e+00, -8.58446264e+00, 0.00000000e+00, -7.20663690e+00, 0.00000000e+00, -6.46734057e+00, -1.68440742e+00, -4.90278793e+00, 1.03541625e-01, -5.23751925e+00, 2.03206317e+00, -5.17077999e+00, -2.07820303e+00, -2.41886204e+00, 1.73244272e-03, -1.93016631e+00, 3.27473815e+00, 0.00000000e+00]
+    expected_comp = 8.584462644544166
     dof_order = [5, 6, 11, 12, 9, 10, 3, 4, 17, 18, 15, 16, 7, 8, 1, 2, 13, 14] # translates dofs in expected to dofs in model
 
     # derivative of the compliance via finite differences
@@ -110,18 +114,17 @@ end
     for i in eachindex(x)
         x_left = copy(x)
         x_left[i] -= delta
-        fea!(results, x_left, model)
-        comp_left = compliance(x_left, results, model)
+        fea!(results, x_left)
+        comp_left = compliance(results)
 
         x_right = copy(x)
         x_right[i] += delta
-        fea!(results, x_right, model)
-        comp_right = compliance(x_right, results, model)
-
+        fea!(results, x_right)
+        comp_right = compliance(results)
         dcdx_fd[i] = (comp_right - comp_left) / 2delta
     end
 
-    @test results.u ≈ expected_u[dof_order]
+    @test u ≈ expected_u[dof_order]
     @test comp ≈ expected_comp
-    @test dcompliance(x, results, model) ≈ dcdx_fd atol = 1e-4
+    @test dcdx ≈ dcdx_fd atol = 1e-4
 end

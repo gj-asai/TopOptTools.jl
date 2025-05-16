@@ -37,13 +37,16 @@ function TopOpt.rotate_stress(global_stress::SymmetricTensor{2}, xe::AbstractVec
     return rotate(global_stress, -θ)
 end
 
-function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
+function compliance(results::FEResults, ::Type{T} where {T<:MMSOMP})
     @unpack K, u = results
     return u' * K * u
 end
 
-function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
+function dcompliance(results::FEResults{T}, ::Type{Interp} where {Interp<:MMSOMP}) where {T}
     @unpack u, ∂Ke∂x = results
+    model = results.model
+    nvar = get_nvar(model)
+
     dcdx = zeros(T, length(∂Ke∂x))
     for cell in CellIterator(model.dh)
         ue = u[celldofs(cell)]
@@ -55,7 +58,11 @@ function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}
     return dcdx
 end
 
-function impact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
+function impact(results::FEResults, ::Type{T} where {T<:MMSOMP})
+    x = results.x
+    model = results.model
+    nvar = get_nvar(model)
+
     CO2 = 0
     for (i, mati) in enumerate(model.mat_interp.mat)
         ρi = x[i:nvar:end]
@@ -64,7 +71,11 @@ function impact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,d
     return CO2
 end
 
-function dimpact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
+function dimpact(results::FEResults{T}, ::Type{Interp} where {Interp<:MMSOMP}) where {T}
+    x = results.x
+    model = results.model
+    nvar = get_nvar(model)
+
     dCO2dx = zeros(T, length(x))
     for (i, mati) in enumerate(model.mat_interp.mat)
         dCO2dx[i:nvar:end] .= mati.CO2 * mati.ρ * model.elemvol
@@ -72,12 +83,20 @@ function dimpact(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,
     return dCO2dx
 end
 
-function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
+function volume(results::FEResults, ::Type{T} where {T<:MMSOMP})
+    x = results.x
+    model = results.model
+    nvar = get_nvar(model)
+
     ρsum = [sum(x[nvar*(i-1)+1:nvar*i-1]) for i in 1:getncells(model.grid)]
     return ρsum ⋅ model.elemvol / sum(model.elemvol)
 end
 
-function dvolume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:MMSOMP}
+function dvolume(results::FEResults{T}, ::Type{Interp} where {Interp<:MMSOMP}) where {T}
+    x = results.x
+    model = results.model
+    nvar = get_nvar(model)
+
     ∂g∂x = zeros(T, length(x))
     for i = 1:length(model.mat_interp.mat)
         ∂g∂x[i:nvar:end] .= model.elemvol / sum(model.elemvol)
@@ -125,9 +144,8 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
             ],
         )
 
-        results = FEResults(model)
         num_elem = getncells(model.grid)
-        nvar = TopOpt.get_nvar(model)
+        nvar = get_nvar(model)
         nmaterials = nvar - 1
 
         # Defining initial values
@@ -138,6 +156,8 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
             end
             push!(x0, deg2rad(angle), -π, π)
         end
+
+        results = FEResults(x0, model)
     end
 
     @timeit "build filters" begin
@@ -151,16 +171,19 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
     @info "Evaluating initial design"
     xnorm = copy(x0)
     xnorm[nmaterials+1:nvar:end] .= 0
-    fea!(results, xnorm, model)
-    comp_ini = compliance(xnorm, results, model) * volfrac^model.mat_interp.penal
-    CO2_ini = impact(xnorm, results, model)
+    fea!(results, xnorm)
+    comp_ini = compliance(results, MMSOMP) * volfrac^model.mat_interp.penal
+    CO2_ini = impact(results, MMSOMP)
     @info @sprintf "Normalization factors: compliance => %.4f, CO2 => %.4f" comp_ini CO2_ini
 
     # Objective function: (1-w).compliance/c_0 + w.impact/CO2_0
-    objective(x) = (1 - wimpact) * compliance(x, results, model) / comp_ini + wimpact * impact(x, results, model) / CO2_ini
+    function objective(x)
+        fea!(results, x)
+        return (1 - wimpact) * compliance(results, MMSOMP) / comp_ini + wimpact * impact(results, MMSOMP) / CO2_ini
+    end
     function dobjective(x)
-        dcdx = dcompliance(x, results, model)
-        dCO2dx = dimpact(x, results, model)
+        dcdx = dcompliance(results, MMSOMP)
+        dCO2dx = dimpact(results, MMSOMP)
 
         # Filter sensitivities
         for i = 1:nmaterials
@@ -173,8 +196,8 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
     obj = MMA.Objective(objective, dobjective)
 
     # Constraint: max volume fraction
-    constraint(x) = volume(x, results, model) / volfrac - 1
-    dconstraint(x) = dvolume(x, results, model) / volfrac
+    constraint(_) = volume(results, MMSOMP) / volfrac - 1
+    dconstraint(_) = dvolume(results, MMSOMP) / volfrac
     cons = MMA.Constraints(constraint, dconstraint)
 
     history = Dict(
@@ -189,14 +212,13 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         :final_compliance => 0,
     )
 
-    x = try
-        # initialize optimization
-        @info "Starting optimization with p = $(model.mat_interp.penal)"
-        mma = MMA.MMAProblem(x0, obj, cons, move=0.5, asyinit=0.1, asydecr=0.5, asyincr=1.1)
-        fea!(results, mma.state.x, model)
+    # initialize optimization
+    @info "Starting optimization with p = $(model.mat_interp.penal)"
+    mma = MMA.MMAProblem(x0, obj, cons, move=0.5, asyinit=0.1, asydecr=0.5, asyincr=1.1)
 
-        comp = compliance(mma.state.x, results, model)
-        CO2 = impact(mma.state.x, results, model)
+    try
+        comp = compliance(results, MMSOMP)
+        CO2 = impact(results, MMSOMP)
         volfracs = Float64[]
         for i = 1:nmaterials
             push!(volfracs, mma.state.x[i:nvar:end] ⋅ model.elemvol / sum(model.elemvol))
@@ -216,12 +238,11 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
             # iterate and smooth result before saving
             MMA.iterate(mma)
             @views TopOpt.filter!(mma.state.x[nmaterials+1:nvar:end], orientation_filter)
-            fea!(results, mma.state.x, model)
             inner_it += 1
 
             # individual objectives, not expensive because uses the FEA results already calculated
-            comp = compliance(mma.state.x, results, model)
-            CO2 = impact(mma.state.x, results, model)
+            comp = compliance(results, MMSOMP)
+            CO2 = impact(results, MMSOMP)
             volfracs = Float64[]
             for i = 1:nmaterials
                 push!(volfracs, mma.state.x[i:nvar:end] ⋅ model.elemvol / sum(model.elemvol))
@@ -260,22 +281,20 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
                 # else, increase p
                 model.mat_interp.penal += 1.0
                 @info "Updated p to $(model.mat_interp.penal)"
-                fea!(results, mma.state.x, model)
                 inner_it = 0
             end
         end
 
         # Evaluate final design
         model.mat_interp.penal = 3.0
-        fea!(results, mma.state.x, model)
-        history[:final_compliance] = compliance(mma.state.x, results, model)
+        fea!(results, mma.state.x)
+        history[:final_compliance] = compliance(results, MMSOMP)
         @info "p = 3 equivalent compliance: $(round(history[:final_compliance], sigdigits=4))"
-        mma.state.x
     catch e
         @warn "Computation interrupted - $(typeof(e))"
         history[:final_compliance] = NaN
-        history[:final_x]
     end
+    TimerOutputs.complement!(TopOpt.timer)
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 
     # Save
@@ -290,14 +309,14 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
             @info "Saved file $(filename).pvd"
         end
 
-        qp_global, qp_material, qp_vonmises, qp_principalstress, qp_principaldir = stress(results, x, model)
+        qp_global, qp_material, qp_vonmises, qp_principalstress, qp_principaldir = stress(results)
         projector = L2Projector(ip^2, model.grid)
 
         # final result
         VTKGridFile("$(filename).final.vtu", grid) do vtk
-            write_cell_data(vtk, @view(x[1:3:end]), "carbon")
-            write_cell_data(vtk, @view(x[2:3:end]), "bamboo")
-            write_cell_data(vtk, @view(x[3:3:end]), "theta")
+            write_cell_data(vtk, @view(mma.state.x[1:3:end]), "carbon")
+            write_cell_data(vtk, @view(mma.state.x[2:3:end]), "bamboo")
+            write_cell_data(vtk, @view(mma.state.x[3:3:end]), "theta")
             write_solution(vtk, model.dh, history[:final_u])
             write_projection(vtk, projector, project(projector, qp_global, qr), "stress - global")
             write_projection(vtk, projector, project(projector, qp_material, qr), "stress - material")

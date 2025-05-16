@@ -21,13 +21,16 @@ function TopOpt.rotate_stress(global_stress::SymmetricTensor{2}, xe::AbstractVec
     return rotate(global_stress, -θ)
 end
 
-function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+function compliance(results::FEResults, ::Type{T} where {T<:SOMP})
     @unpack K, u = results
     return u' * K * u
 end
 
-function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+function dcompliance(results::FEResults{T}, ::Type{Interp} where {Interp<:SOMP}) where {T}
     @unpack u, ∂Ke∂x = results
+    model = results.model
+    nvar = get_nvar(results.model)
+
     dcdx = zeros(T, length(∂Ke∂x))
     for cell in CellIterator(model.dh)
         ue = u[celldofs(cell)]
@@ -39,12 +42,16 @@ function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}
     return dcdx
 end
 
-function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+function volume(results::FEResults, ::Type{T} where {T<:SOMP})
+    model = results.model
+    x = results.x
     ρ = @view x[1:2:end]
     return ρ ⋅ model.elemvol / sum(model.elemvol)
 end
 
-function dvolume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SOMP}
+function dvolume(results::FEResults{T}, ::Type{Interp} where {Interp<:SOMP}) where {T}
+    model = results.model
+    x = results.x
     ∂g∂x = zeros(T, length(x))
     ∂g∂x[1:2:end] .= model.elemvol / sum(model.elemvol)
     return ∂g∂x
@@ -88,8 +95,6 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
                 TopOpt.NodalLoad("force", (0.0, -100.0)),
             ],
         )
-
-        results = FEResults(model)
         num_elem = getncells(model.grid)
 
         # Defining initial values
@@ -98,6 +103,8 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
             push!(x0, volfrac, 1e-3, 1)
             push!(x0, deg2rad(angle), -π, π)
         end
+
+        results = FEResults(x0, model)
     end
 
     @timeit "build filters" begin
@@ -109,12 +116,12 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
 
     function objective(x)
         @views TopOpt.filter!(x[2:2:end], orientation_filter)
-        fea!(results, x, model)
+        fea!(results, x)
 
-        return compliance(x, results, model)
+        return compliance(results, SOMP)
     end
     function dobjective(x)
-        dcdx = dcompliance(x, results, model)
+        dcdx = dcompliance(results, SOMP)
         @views TopOpt.filter!(dcdx[1:2:end], x[1:2:end], density_filter)
 
         return dcdx
@@ -122,38 +129,33 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
     obj = MMA.Objective(objective, dobjective)
 
     # Constraint: max volume fraction
-    constraint(x) = volume(x, results, model) / volfrac - 1
-    dconstraint(x) = dvolume(x, results, model) / volfrac
+    constraint(_) = volume(results, SOMP) / volfrac - 1
+    dconstraint(_) = dvolume(results, SOMP) / volfrac
     cons = MMA.Constraints(constraint, dconstraint)
 
     history = Dict(
         :final_x => Float64[],
         :final_u => Float64[],
-        :compliance => Float64[],
         :penal => Float64[],
         :objective => Float64[],
         :constraint => Vector{Float64}[],
     )
 
-    x = try
-        # initialize optimization
-        @info "Starting optimization with p = $(model.mat_interp.penal)"
-        mma = MMA.MMAProblem(x0, obj, cons)
-        fea!(results, mma.state.x, model)
+    # initialize optimization
+    @info "Starting optimization with p = $(model.mat_interp.penal)"
+    mma = MMA.MMAProblem(x0, obj, cons)
+    @info @sprintf "It = %4d | c = %10.4f" mma.state.it mma.state.cur_obj
 
+    try
         for _ in 1:maxiter
             # iterate and smooth result before saving
             MMA.iterate(mma)
             @views TopOpt.filter!(mma.state.x[2:2:end], orientation_filter)
-            fea!(results, mma.state.x, model)
-
-            comp = compliance(mma.state.x, results, model)
             @info @sprintf "It = %4d | c = %10.4f" mma.state.it mma.state.cur_obj
 
             # Push to history
             history[:final_x] = mma.state.x
             history[:final_u] = results.u
-            push!(history[:compliance], comp)
             push!(history[:penal], mat_interp.penal)
             push!(history[:objective], mma.state.cur_obj)
             push!(history[:constraint], mma.state.cur_cons)
@@ -170,13 +172,10 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
 
             MMA.relative_change(mma.state) < 1e-4 && break
         end
-
-        mma.state.x
     catch e
         @warn "Computation interrupted - $(typeof(e))"
-        history[:final_compliance] = NaN
-        history[:final_x]
     end
+    TimerOutputs.complement!(TopOpt.timer)
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 
     # Save
@@ -191,13 +190,13 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
             @info "Saved file $(filename).pvd"
         end
 
-        qp_global, qp_material, qp_vonmises, qp_principalstress, qp_principaldir = stress(results, x, model)
+        qp_global, qp_material, qp_vonmises, qp_principalstress, qp_principaldir = stress(results)
         projector = L2Projector(ip^2, model.grid)
 
         # final result
         VTKGridFile("$(filename).final.vtu", grid) do vtk
-            write_cell_data(vtk, @view(x[1:2:end]), "carbon")
-            write_cell_data(vtk, @view(x[2:2:end]), "theta")
+            write_cell_data(vtk, @view(mma.state.x[1:2:end]), "carbon")
+            write_cell_data(vtk, @view(mma.state.x[2:2:end]), "theta")
             write_solution(vtk, model.dh, history[:final_u])
             write_projection(vtk, projector, project(projector, qp_global, qr), "stress - global")
             write_projection(vtk, projector, project(projector, qp_material, qr), "stress - material")

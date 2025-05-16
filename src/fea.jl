@@ -19,7 +19,10 @@ function ScratchData(model::FEModel, K::SparseMatrixCSC)
     return ScratchData(cell_cache, cellvalues, Ke, jac, asm)
 end
 
-struct FEResults{T<:Real,MT<:SparseMatrixCSC{T},SD<:ScratchData}
+struct FEResults{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,MT<:SparseMatrixCSC{T},SD<:ScratchData}
+    x::VT
+    model::FEM
+
     K::MT
     f::Vector{T}
     ∂Ke∂x::Vector{Matrix{T}}
@@ -27,7 +30,7 @@ struct FEResults{T<:Real,MT<:SparseMatrixCSC{T},SD<:ScratchData}
     chnl::Channel{SD}
 end
 
-function FEResults(model::FEModel)
+function FEResults(x0::AbstractVector, model::FEModel)
     f = compute_force_vector(model)
     apply!(f, model.ch)
 
@@ -44,14 +47,17 @@ function FEResults(model::FEModel)
         put!(chnl, ScratchData(model, K))
     end
 
-    return FEResults(K, f, ∂Ke∂x, u, chnl)
+    return FEResults(copy(x0), model, K, f, ∂Ke∂x, u, chnl)
 end
 
-function fea!(results::FEResults, x::DesignVector, model::FEModel)
+function fea!(results::FEResults, x::AbstractVector)
     @unpack K, f, u = results
+    model = results.model
+
+    results.x .= x
 
     @timeit timer "assemble" begin
-        global_stiffness!(results, x, model)
+        global_stiffness!(results)
         apply!(K, model.ch)
     end
 
@@ -66,8 +72,9 @@ function fea!(results::FEResults, x::DesignVector, model::FEModel)
     end
 end
 
-function global_stiffness!(results::FEResults, x::DesignVector, model::FEModel)
-    @unpack K, ∂Ke∂x, chnl = results
+function global_stiffness!(results::FEResults)
+    @unpack x, K, ∂Ke∂x, chnl = results
+    model = results.model
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
     nvar = get_nvar(model)
@@ -147,8 +154,10 @@ function compute_force_vector(model::FEModel)
     return f
 end
 
-function stress(result::FEResults, x::DesignVector, model::FEModel{dim}) where {dim}
-    @unpack cellvalues, mat_interp, grid, dh = model
+function stress(results::FEResults)
+    x = results.x
+    @unpack cellvalues, mat_interp, grid, dh = results.model
+    dim = get_dim(results.model)
 
     qp_global = [
         [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
@@ -181,7 +190,7 @@ function stress(result::FEResults, x::DesignVector, model::FEModel{dim}) where {
         cell_directions = qp_directions[e]
         for q_point in 1:getnquadpoints(cellvalues)
             xe = element_slice(x, e)
-            ε = function_symmetric_gradient(cellvalues, q_point, result.u, celldofs(cell))
+            ε = function_symmetric_gradient(cellvalues, q_point, results.u, celldofs(cell))
             σ = interpolate(xe, mat_interp) ⊡ ε
             s = dev(σ)
 

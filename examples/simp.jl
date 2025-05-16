@@ -16,13 +16,15 @@ function TopOpt.interpolate(xe::AbstractVector, interp::SIMP)
     return ρ^interp.penal * interp.mat.C
 end
 
-function compliance(_, results::FEResults{T}, ::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+function compliance(results::FEResults, ::Type{T} where {T<:SIMP})
     @unpack K, u = results
     return u' * K * u
 end
 
-function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+function dcompliance(results::FEResults, ::Type{T} where {T<:SIMP})
     @unpack u, ∂Ke∂x = results
+    model = results.model
+
     dcdx = zeros(length(∂Ke∂x))
     for cell in CellIterator(model.dh)
         ue = u[celldofs(cell)]
@@ -31,11 +33,14 @@ function dcompliance(_, results::FEResults{T}, model::FEModel{dim,nvar,T,interp}
     return dcdx
 end
 
-function volume(x, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+function volume(results::FEResults, ::Type{T} where {T<:SIMP})
+    x = results.x
+    model = results.model
     return x ⋅ model.elemvol / sum(model.elemvol)
 end
 
-function dvolume(_, ::FEResults{T}, model::FEModel{dim,nvar,T,interp}) where {T,dim,nvar,interp<:SIMP}
+function dvolume(results::FEResults, ::Type{T} where {T<:SIMP})
+    model = results.model
     return model.elemvol / sum(model.elemvol)
 end
 
@@ -76,8 +81,6 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
                 TopOpt.NodalLoad("force", (0.0, -100.0)),
             ],
         )
-
-        results = FEResults(model)
         num_elem = getncells(model.grid)
 
         # Defining initial values
@@ -85,6 +88,8 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
         foreach(1:num_elem) do _
             push!(x0, volfrac, 1e-3, 1)
         end
+
+        results = FEResults(x0, model)
     end
 
     @timeit "build filters" begin
@@ -94,71 +99,63 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
 
     # Objective: compliance
     function objective(x)
-        fea!(results, x, model)
-        return compliance(x, results, model)
+        fea!(results, x)
+        return compliance(results, SIMP)
     end
     function dobjective(x)
-        dcdx = dcompliance(x, results, model)
+        dcdx = dcompliance(results, SIMP)
         TopOpt.filter!(dcdx, x, density_filter)
         return dcdx
     end
     obj = MMA.Objective(objective, dobjective)
 
     # Constraint: max volume fraction
-    constraint(x) = volume(x, results, model) / volfrac - 1
-    dconstraint(x) = dvolume(x, results, model) / volfrac
+    constraint(_) = volume(results, SIMP) / volfrac - 1
+    dconstraint(_) = dvolume(results, SIMP) / volfrac
     cons = MMA.Constraints(constraint, dconstraint)
 
     history = Dict(
         :final_x => Float64[],
         :final_u => Float64[],
-        :compliance => Float64[],
         :penal => Float64[],
         :objective => Float64[],
         :constraint => Vector{Float64}[],
         :final_compliance => 0,
     )
 
-    x = try
-        # initialize optimization
-        @info "Starting optimization with p = $(model.mat_interp.penal)"
-        mma = MMA.MMAProblem(x0, obj, cons)
-        fea!(results, mma.state.x, model)
+    # initialize optimization
+    @info "Starting optimization with p = $(model.mat_interp.penal)"
+    mma = MMA.MMAProblem(x0, obj, cons)
+    @info @sprintf "It = %4d | c = %10.4f" mma.state.it mma.state.cur_obj
 
+    try
         for _ in 1:maxiter
             MMA.iterate(mma)
-            fea!(results, mma.state.x, model)
-
-            x = mma.state.x
             @info @sprintf "It = %4d | c = %10.4f" mma.state.it mma.state.cur_obj
-            comp = compliance(x, results, model)
 
             # Push to history
-            history[:final_x] = x
+            history[:final_x] = mma.state.x
             history[:final_u] = results.u
-            push!(history[:compliance], comp)
             push!(history[:penal], mat_interp.penal)
             push!(history[:objective], mma.state.cur_obj)
             push!(history[:constraint], mma.state.cur_cons)
 
             # Save iteration
             !isnothing(filename) && save_partial && @timeit "export" begin
-                    i = length(history[:compliance]) - 1
+                    i = length(history[:objective]) - 1
                     filename_i = @sprintf "%s.%4.4d.vtu" filename i
                     VTKGridFile(filename_i, grid) do vtk
-                        write_cell_data(vtk, x, "carbon")
+                        write_cell_data(vtk, mma.state.x, "density")
                         pvd[i] = vtk
                     end
                 end
 
             MMA.relative_change(mma.state) < 1e-5 && break
         end
-
-        mma.state.x
     catch e
         @warn "Computation interrupted - $(typeof(e))"
-        history[:final_x]
     end
+    TimerOutputs.complement!(TopOpt.timer)
     merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer)
 
     # Save
@@ -175,7 +172,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
 
         # final result
         VTKGridFile("$(filename).final.vtu", grid) do vtk
-            write_cell_data(vtk, x, "carbon")
+            write_cell_data(vtk, mma.state.x, "density")
             write_solution(vtk, model.dh, history[:final_u])
         end
         @info "Saved file $(filename).final.vtu"

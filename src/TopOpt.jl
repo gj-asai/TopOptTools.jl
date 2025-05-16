@@ -15,7 +15,7 @@ using Ferrite,
 
 export Material, Isotropic2D, Orthotropic2D, Orthotropic3D,
     NodalLoad, LinearLoad,
-    MaterialInterpolation, FEModel,
+    MaterialInterpolation, FEModel, get_dim, get_nvar,
     DesignVector, MMA,
     FEResults, fea!, stress,
     ConvolutionFilter, filter!
