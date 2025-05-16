@@ -2,7 +2,7 @@
 # Svanberg, K. (1987), The method of moving asymptotes—a new method for structural optimization. Int. J. Numer. Meth. Engng., 24: 359-373. https://doi.org/10.1002/nme.1620240207
 
 @testset "Cantilever beam" begin
-    x0 = DesignVariables(1)
+    x0 = DesignVector(1)
     foreach(1:5) do _
         push!(x0, 5.0, 0.0, 10.0)
     end
@@ -28,7 +28,7 @@
 end
 
 @testset "2 bar truss" begin
-    x0 = DesignVariables(1)
+    x0 = DesignVector(1)
     push!(x0, 1.5, 0.2, 4.0)
     push!(x0, 0.5, 0.1, 1.6)
 

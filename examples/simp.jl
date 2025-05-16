@@ -81,7 +81,7 @@ function mbb_simp(volfrac, rρ; echo=true, maxiter=500, filename=nothing, save_p
         num_elem = getncells(model.grid)
 
         # Defining initial values
-        x0 = DesignVariables(1)
+        x0 = DesignVector(1)
         foreach(1:num_elem) do _
             push!(x0, volfrac, 1e-3, 1)
         end

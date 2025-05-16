@@ -24,7 +24,7 @@ using Ferrite
     @test dc ≈ expected_filtered atol = 1e-7
 end
 
-@testset "Filtering a DesignVariables" begin
+@testset "Filtering a DesignVector" begin
     # 3x2 mbb
     model = FEModel(
         grid=generate_grid(Quadrilateral, (3, 2), Vec((0.0, 0.0)), Vec((3.0, 2.0))),
@@ -41,7 +41,7 @@ end
     dc = [0.98923353, 0.90642167, 0.238167, 0.09401264, 0.46788691, 0.13252324][cell_order]
     expected_filtered = [2.01845418, 0.60828234, 0.16402637, 0.30627508, 0.44355712, 0.2129366][cell_order]
 
-    x_dv = DesignVariables(1)
+    x_dv = DesignVector(1)
     for xe in x
         push!(x_dv, xe, 1e-3, 1)
     end

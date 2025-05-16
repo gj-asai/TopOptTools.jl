@@ -93,7 +93,7 @@ function mbb_somp(volfrac, rρ, rθ; echo=true, maxiter=2500, angle=0, filename=
         num_elem = getncells(model.grid)
 
         # Defining initial values
-        x0 = DesignVariables(2)
+        x0 = DesignVector(2)
         foreach(1:num_elem) do _
             push!(x0, volfrac, 1e-3, 1)
             push!(x0, deg2rad(angle), -π, π)

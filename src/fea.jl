@@ -47,7 +47,7 @@ function FEResults(model::FEModel)
     return FEResults(K, f, ∂Ke∂x, u, chnl)
 end
 
-function fea!(results::FEResults, x::DesignVariables, model::FEModel)
+function fea!(results::FEResults, x::DesignVector, model::FEModel)
     @unpack K, f, u = results
 
     @timeit timer "assemble" begin
@@ -59,11 +59,14 @@ function fea!(results::FEResults, x::DesignVariables, model::FEModel)
         u .= LinearSolve.solve(
             LinearSolve.LinearProblem(K, f),
             SparspakFactorization(),
+            # for larger problems this should be better:
+            # needs using AlgebraicMultigrid
+            # KrylovJL_CG(precs = SmoothedAggregationPreconBuilder()),
         ).u
     end
 end
 
-function global_stiffness!(results::FEResults, x::DesignVariables, model::FEModel)
+function global_stiffness!(results::FEResults, x::DesignVector, model::FEModel)
     @unpack K, ∂Ke∂x, chnl = results
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
@@ -144,7 +147,7 @@ function compute_force_vector(model::FEModel)
     return f
 end
 
-function stress(result::FEResults, x::DesignVariables, model::FEModel{dim}) where {dim}
+function stress(result::FEResults, x::DesignVector, model::FEModel{dim}) where {dim}
     @unpack cellvalues, mat_interp, grid, dh = model
 
     qp_global = [

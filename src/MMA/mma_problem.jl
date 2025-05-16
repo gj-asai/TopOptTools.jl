@@ -6,7 +6,7 @@ struct MMAProblem{T<:Real,TF<:Objective,TG<:Constraints}
     f::TF
     g::TG
 end
-function MMAProblem(x0::DesignVariables{T}, obj::Objective, cons::Constraints; move=0.5, asyinit=0.5, asydecr=0.7, asyincr=1.2) where {T}
+function MMAProblem(x0::DesignVector{T}, obj::Objective, cons::Constraints; move=0.5, asyinit=0.5, asydecr=0.7, asyincr=1.2) where {T}
     n = length(x0)
     m = cons.m
     return MMAProblem(

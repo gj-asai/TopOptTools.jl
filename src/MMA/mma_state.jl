@@ -1,8 +1,8 @@
 mutable struct MMAState{T<:Real}
     it::Int
-    x::DesignVariables{T,T}
-    xprev1::DesignVariables{T,T}
-    xprev2::DesignVariables{T,T}
+    x::DesignVector{T,T}
+    xprev1::DesignVector{T,T}
+    xprev2::DesignVector{T,T}
 
     cur_obj::T
     cur_dobj::Vector{T}

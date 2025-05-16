@@ -90,7 +90,7 @@ end
             TopOpt.NodalLoad("force", (0.0, -1.0)),
         ],
     )
-    x = DesignVariables(1)
+    x = DesignVector(1)
     foreach(1:4) do _
         push!(x, 1.0, 1e-3, 1.0)
     end

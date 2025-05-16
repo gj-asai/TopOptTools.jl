@@ -131,7 +131,7 @@ function mbb_minimpact_mmsomp(volfrac, rρ, rθ, wimpact; echo=true, maxiter=250
         nmaterials = nvar - 1
 
         # Defining initial values
-        x0 = DesignVariables(nvar)
+        x0 = DesignVector(nvar)
         foreach(1:num_elem) do _
             foreach(1:nmaterials) do _
                 push!(x0, volfrac / nmaterials, 1e-3, 1)
