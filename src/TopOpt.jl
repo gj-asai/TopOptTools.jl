@@ -1,7 +1,7 @@
 module TopOpt
 
-using MKL
-using Ferrite,
+using MKL,
+    Ferrite,
     Tensors,
     LinearAlgebra,
     SparseArrays,
@@ -18,7 +18,7 @@ export Material, Isotropic2D, Orthotropic2D, Orthotropic3D,
     MaterialInterpolation, FEModel, get_dim, get_nvar,
     DesignVector, MMA,
     FEResults, fea!, stress,
-    ConvolutionFilter, filter!
+    ConvolutionFilter, PDEFilter, filter!
 
 const timer = TimerOutput()
 
@@ -32,6 +32,7 @@ include("fea.jl")
 
 # Optimization
 include("MMA/MMA.jl")
-include("filters.jl")
+include("filter_convolution.jl")
+include("filter_pde.jl")
 
 end # module TopOpt

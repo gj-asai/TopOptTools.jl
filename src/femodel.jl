@@ -2,7 +2,7 @@ abstract type MaterialInterpolation{nvar,T<:Real} end
 interpolate(::AbstractVector, interp::MaterialInterpolation) = throw("Method TopOpt.interpolate(::AbstractVector, ::$(typeof(interp))) is not defined")
 rotate_stress(::SymmetricTensor{2}, ::AbstractVector, interp::MaterialInterpolation) = throw("Method TopOpt.rotate_stress(::SymmetricTensor{2}, ::AbstractVector, ::$(typeof(interp))) is not defined")
 
-struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},BT<:BallTree,CV<:CellValues,FV<:FacetValues}
+struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},BT<:BallTree,CV<:CellValues,FV<:FacetValues,IP<:Interpolation,QR<:QuadratureRule}
     grid::G
     balltree::BT
     centers::Matrix{T}
@@ -14,6 +14,9 @@ struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{di
 
     cellvalues::CV
     facetvalues::FV
+    ip::IP
+    qr::QR
+
     dh::DofHandler{dim,G}
     ch::ConstraintHandler{DofHandler{dim,G},T}
     colors::Vector{Vector{Int}}
@@ -66,7 +69,7 @@ function FEModel(;
     end
     tree = BallTree(centers)
 
-    return FEModel(grid, tree, centers, elemvol, mat_interp, constraints, loads, cellvalues, facetvalues, dh, ch, colors)
+    return FEModel(grid, tree, centers, elemvol, mat_interp, constraints, loads, cellvalues, facetvalues, ip, qr, dh, ch, colors)
 end
 
 get_dim(::FEModel{dim}) where {dim} = dim
