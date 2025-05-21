@@ -13,7 +13,7 @@ using MKL,
     UnPack,
     TimerOutputs
 
-export Material, Isotropic2D, Orthotropic2D, Orthotropic3D,
+export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D,
     NodalLoad, LinearLoad,
     MaterialInterpolation, FEModel, get_dim, get_nvar,
     DesignVector, MMA,
