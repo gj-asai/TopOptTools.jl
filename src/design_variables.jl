@@ -28,6 +28,10 @@ function parameter_slice(x::DesignVector, idx::Int)
     return @view x[idx:n:end]
 end
 
+# if not a DesignVector, assume there is one design variable per element
+element_slice(x::AbstractArray, el::Int) = [x[el]]
+parameter_slice(x::AbstractArray, ::Int) = x
+
 get_limits(x::DesignVector, i::Int) = (x.lim_inf[i], x.lim_sup[i])
 
 # applying broadcast only on the variables field
