@@ -1,12 +1,10 @@
 module TopOpt
 
-using MKL,
+using MKL, Pardiso,
     Ferrite,
     Tensors,
     LinearAlgebra,
     SparseArrays,
-    AlgebraicMultigrid,
-    LinearSolve,
     ForwardDiff,
     NearestNeighbors,
     OhMyThreads,
@@ -21,6 +19,7 @@ export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D,
     ConvolutionFilter, PDEFilter, filter!
 
 const timer = TimerOutput()
+const ps = MKLPardisoSolver()
 
 include("design_variables.jl")
 

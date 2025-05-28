@@ -19,12 +19,12 @@ function ScratchData(model::FEModel, K::SparseMatrixCSC)
     return ScratchData(cell_cache, cellvalues, Ke, jac, asm)
 end
 
-struct FEResults{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,MT<:SparseMatrixCSC{T},FT<:SparseVector{T},SD<:ScratchData}
+struct FEResults{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,MT<:SparseMatrixCSC{T},SD<:ScratchData}
     x::VT
     model::FEM
 
     K::MT
-    f::FT
+    f::Vector{T}
     ∂Ke∂x::Vector{Matrix{T}}
     u::Vector{T}
     chnl::Channel{SD}
@@ -50,22 +50,18 @@ function FEResults(x0::AbstractVector, model::FEModel)
     return FEResults(copy(x0), model, K, f, ∂Ke∂x, u, chnl)
 end
 
-function fea!(results::FEResults, x::AbstractVector)
+function fea!(results::FEResults{T}, x::AbstractVector) where {T}
     @unpack K, f, u = results
-    model = results.model
-
     results.x .= x
 
     @timeit timer "assemble" begin
         global_stiffness!(results)
-        apply!(K, model.ch)
+        apply!(K, results.model.ch)
     end
 
     @timeit timer "solve" begin
-        u .= LinearSolve.solve(
-            LinearSolve.LinearProblem(K, f),
-            KrylovJL_CG(precs=SmoothedAggregationPreconBuilder()),
-        ).u
+        # ps is the MKLPardisoSolver from the module namespace
+        solve!(ps, u, K, f) # solve linear system and store in u
     end
 end
 
@@ -117,7 +113,7 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
 end
 
 function compute_force_vector(model::FEModel)
-    f = spzeros(ndofs(model.dh))
+    f = zeros(ndofs(model.dh))
     dim = get_dim(model)
 
     # nodal forces
