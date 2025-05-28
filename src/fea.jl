@@ -64,10 +64,7 @@ function fea!(results::FEResults, x::AbstractVector)
     @timeit timer "solve" begin
         u .= LinearSolve.solve(
             LinearSolve.LinearProblem(K, f),
-            # SparspakFactorization(),
-            # for larger problems this should be better:
-            # needs using AlgebraicMultigrid
-            KrylovJL_CG(precs = SmoothedAggregationPreconBuilder()),
+            KrylovJL_CG(precs=SmoothedAggregationPreconBuilder()),
         ).u
     end
 end
