@@ -1,6 +1,5 @@
 abstract type MaterialInterpolation{nvar,T<:Real} end
 interpolate(::AbstractVector, interp::MaterialInterpolation) = throw("Method TopOpt.interpolate(::AbstractVector, ::$(typeof(interp))) is not defined")
-rotate_stress(::SymmetricTensor{2}, ::AbstractVector, interp::MaterialInterpolation) = throw("Method TopOpt.rotate_stress(::SymmetricTensor{2}, ::AbstractVector, ::$(typeof(interp))) is not defined")
 
 struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},BT<:BallTree,CV<:CellValues,FV<:FacetValues,IP<:Interpolation,QR<:QuadratureRule}
     grid::G
@@ -35,7 +34,7 @@ function FEModel(;
 
     qr_order = length(Ferrite.getpoints(qr))
     face_qr = FacetQuadratureRule{shape}(qr_order)
-    facetvalues = FacetValues(face_qr, ip)
+    facetvalues = FacetValues(face_qr, ip^(dim - 1))
     colors = create_coloring(grid) # coloring for parallel assemble
 
     # degrees of freedom
