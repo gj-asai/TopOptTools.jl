@@ -2,14 +2,14 @@
 Multi-material topology optimization for ecoefficiency
 
 Using a three field representation for the densities:
-    - Design variables ∈ [0,1] are filtered using a w filter of radius rρ
+    - Design variables ∈ [0,1] are filtered using a convolution filter of radius rρ
     - Filtered field is projected using a smooth Heaviside function, with continuation on its sharpness
 
 Material orientation is represented by one angle ∈ [-π,π]
     - Filtered using a convolution filter of radius rθ
 
 The interpolated constitutive matrix is given by:
-C = C_void + Σ_i ( xi^p Π_(j≠i) ((1 - xj^p)*C_0,i) ),
+C = C_void + Σ_i ( xi^p Π_(j≠i) (1 - xj^p) * C_0,i ),
 where:
 C_0,i are the constitutive matrices of each candidate material
 Cvoid is the constitutive matrix of an isotropic material with very low stiffness

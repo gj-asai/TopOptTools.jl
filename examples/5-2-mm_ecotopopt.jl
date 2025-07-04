@@ -2,14 +2,14 @@
 Multi-material topology optimization for ecoefficiency
 
 Using a three field representation for the densities:
-    - Design variables ∈ [0,1] are filtered using a w filter of radius rρ
+    - Design variables ∈ [0,1] are filtered using a convolution filter of radius rρ
     - Filtered field is projected using a smooth Heaviside function, with continuation on its sharpness
 
 Material orientation is represented by one angle ∈ [-π,π]
     - Filtered using a convolution filter of radius rθ
 
 The interpolated constitutive matrix is given by:
-C = C_void + Σ_i ( xi^p Π_(j≠i) ((1 - xj^p)*C_0,i) ),
+C = C_void + Σ_i ( xi^p Π_(j≠i) (1 - xj^p) * C_0,i ),
 where:
 C_0,i are the constitutive matrices of each candidate material
 Cvoid is the constitutive matrix of an isotropic material with very low stiffness
@@ -125,7 +125,7 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
 
     # initialize MMA
     m, n = 2, length(x)
-    mma = MMAWorkspace(m, n, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.3)
+    mma = MMAWorkspace(m, n, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.5)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
     xold1, xold2 = similar(x), similar(x)
 
@@ -234,7 +234,7 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
             # apply continuation
             if (continuation_iter >= 40 && change < 1e-4) || continuation_iter >= 100
                 # if at max beta, stop the optimization
-                beta == 64 && break
+                beta == 32 && break
                 # else, increase beta and p, decrease gamma
                 beta *= 2
                 mat_interp.penal = min(3.0, mat_interp.penal + 1.0)
@@ -244,7 +244,7 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
 
             # MMA update
             @timeit "mma update" begin
-                xnew = mma_update!(mma, m, n, loop,
+                xnew = mma_update!(mma, m, n, continuation_iter,
                     x, x.lim_inf, x.lim_sup, xold1, xold2,
                     CO2 / CO2_ini, dCO2dx / CO2_ini, g, dgdx',
                     a0mma, amma, cmma, dmma
@@ -275,6 +275,10 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
             # history
             save("$(filename).jld2", "history", history)
             @info "Saved file $(filename).jld2"
+
+            # final design
+            save("$(filename).design.jld2", "xPhys", xPhys)
+            @info "Saved file $(filename).design.jld2"
 
             # paraview .pvd
             vtk_save(pvd)
