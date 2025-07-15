@@ -91,7 +91,7 @@ function geometry_projection(volfrac; filename=nothing)
     m, n = 1, length(z)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
     zold1, zold2 = similar(z), similar(z)
-    mma = MMAWorkspace(m, n; move=0.05)
+    mma = MMAWorkspace(m, n; move=0.01)
 
     # geometry projection parameters
     ρmin = 1e-2

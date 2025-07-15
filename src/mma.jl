@@ -24,6 +24,7 @@ function MMAWorkspace(m::Int, n::Int; asyinit=0.5, asyincr=1.2, asydecr=0.7, mov
     opt = Opt(:LD_CCSAQ, n + m + 1)
     xtol_rel!(opt, 1e-5)
     maxeval!(opt, 200)
+    maxtime!(opt, 10)
     MMAWorkspace(
         opt, asyinit, asyincr, asydecr, move,
         Vector{Float64}(undef, n), Vector{Float64}(undef, n), Vector{Float64}(undef, n), Vector{Float64}(undef, n),

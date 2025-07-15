@@ -74,8 +74,8 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
     ]
 
     # materials
-    carbon = Orthotropic2D(El=122.98e3, Et=10.2e3, nult=0.25, Glt=3.67e3, ρ=1.54e-3, CO2=11.29)
-    bamboo = Orthotropic2D(El=10.48e3, Et=5.26e3, nult=0.39, Glt=1.89e3, ρ=0.98e-3, CO2=1.668)
+    carbon = Orthotropic2D(El=16.7e3, Et=3.7e3, nult=0.33, Glt=1.4e3, ρ=1.27e-3, CO2=10.1)
+    bamboo = Orthotropic2D(El=10.8e3, Et=4.6e3, nult=0.36, Glt=1.7e3, ρ=1.12e-3, CO2=2.9)
     mat_interp = MMSOMP([carbon, bamboo], 1.0)
 
     # element interpolation and quadrature
@@ -125,7 +125,7 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
 
     # initialize MMA
     m, n = 2, length(x)
-    mma = MMAWorkspace(m, n, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.5)
+    mma = MMAWorkspace(m, n, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.45)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
     xold1, xold2 = similar(x), similar(x)
 
@@ -133,7 +133,7 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
     eta = 0.5
     @info "Starting optimization with beta = $(beta) and p = $(mat_interp.penal)"
     try
-        maxiter = 1000
+        maxiter = 1200
         continuation_iter = 0
         for loop in 1:maxiter
             continuation_iter += 1
@@ -232,9 +232,9 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
             end
 
             # apply continuation
-            if (continuation_iter >= 40 && change < 1e-4) || continuation_iter >= 100
+            if (continuation_iter >= 100 && change < 1e-4) || continuation_iter >= 200
                 # if at max beta, stop the optimization
-                beta == 32 && break
+                beta == 64 && break
                 # else, increase beta and p, decrease gamma
                 beta *= 2
                 mat_interp.penal = min(3.0, mat_interp.penal + 1.0)
