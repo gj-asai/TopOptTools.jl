@@ -6,8 +6,7 @@ J. Wu, N. Aage, R. Westermann and O. Sigmund
 Infill Optimization for Additive Manufacturing - Approaching Bone-like Porous Structures
 IEEE Trans. on Visualization and Computer Graphics (2017)
 """
-# BUG: this code is only partially working
-# WARNING: only works when all elements are 1x1
+# WARNING: assumes that all elements are 1x1
 # INFO: plotting contains some workarounds needed until FerriteViz supports Ferrite v1.0
 
 using Ferrite, FerriteGmsh, UnPack
@@ -19,7 +18,7 @@ mutable struct mSIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, simp::mSIMP) = xe[1]^simp.penal * simp.mat.C
+TopOpt.interpolate(xe::AbstractVector, simp::mSIMP) = TopOpt.void(Val(2)).C + xe[1]^simp.penal * simp.mat.C
 
 function infill(vol_local, rρ, rlocal)
     reset_timer!()
