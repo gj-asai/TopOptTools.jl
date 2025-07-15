@@ -13,6 +13,7 @@ Base.getindex(x::DesignVector, i::Int) = x.variables[i]
 Base.setindex!(x::DesignVector, xe, i::Int) = (x.variables[i] = xe)
 Base.similar(x::DesignVector, ::Type{S}, dims::Dims) where {S} = DesignVector(similar(x.variables, S, dims), x.vars_per_element, x.lim_inf, x.lim_sup)
 
+# TODO: improve the initialization of the DesignVector
 function Base.push!(x::DesignVector, xe, lim_inf, lim_sup)
     push!(x.variables, xe)
     push!(x.lim_inf, lim_inf)
@@ -29,7 +30,7 @@ function parameter_slice(x::DesignVector, idx::Int)
 end
 
 # if not a DesignVector, assume there is one design variable per element
-element_slice(x::AbstractArray, el::Int) = [x[el]]
+element_slice(x::AbstractArray, el::Int) = @view x[el:el]
 parameter_slice(x::AbstractArray, ::Int) = x
 
 get_limits(x::DesignVector, i::Int) = (x.lim_inf[i], x.lim_sup[i])

@@ -1,39 +1,32 @@
 name = "TopOpt"
 uuid = "d486209d-77d0-459c-90e8-0e65762702e0"
 authors = ["Gustavo Asai <gustavojun.asai@gmail.com>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 Ferrite = "c061ca5d-56c9-439f-9c0e-210fe06d3992"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MKL = "33e6dc65-8f57-5167-99aa-e5a354878fb2"
+NLopt = "76087f3c-5699-56af-9a33-bf431cd00edd"
 NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
 OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
 Pardiso = "46dd5b70-b6fb-5a00-ae2d-e8fea33afaf2"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Tensors = "48a634ad-e948-5137-8d70-aa71f2a747f4"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 
 [compat]
 Ferrite = "1"
-ForwardDiff = "1"
 LinearAlgebra = "1.11.0"
-MKL = "0.8"
+MKL = "0.9"
+NLopt = "1.1.4"
 NearestNeighbors = "0.4.21"
 OhMyThreads = "0.8.3"
 Pardiso = "1.0.1"
 SparseArrays = "1.11.0"
-Statistics = "1.11.1"
 Tensors = "1.16.2"
 TimerOutputs = "0.5.28"
 UnPack = "1.0.2"
 julia = "1.11.5"
-
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["Test"]

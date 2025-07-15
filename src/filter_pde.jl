@@ -1,6 +1,7 @@
-struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC}
+mutable struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,SS<:MKLPardisoSolver}
     Kf::TK
     T::TT
+    ps::SS
 end
 
 function PDEFilter(radius::Float64, model::FEModel)
@@ -44,15 +45,26 @@ function PDEFilter(radius::Float64, model::FEModel)
 
         assemble!(assembler, celldofs(cell), Ke)
     end
+    tril!(Kf) # Pardiso solver will use only the lower part of the matrix
 
-    return PDEFilter(Kf, T)
+    ps = MKLPardisoSolver()
+    set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
+    set_iparm!(ps, 1, 1) # to be able to manually set iparm
+    set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
+
+    f = PDEFilter(Kf, T, ps)
+    finalizer(f) do x
+        set_phase!(x.ps, Pardiso.RELEASE_ALL)
+    end
 end
 
 function filter!(x::AbstractVector, f::PDEFilter)
-    x .= f.T' * LinearSolve.solve(
-        LinearSolve.LinearProblem(f.Kf, f.T * x),
-        KrylovJL_CG(),
-    ).u
+    x_filt = Vector{Float64}(undef, size(f.T, 1))
+    pardiso(f.ps, x_filt, f.Kf, f.T * x)
+    x .= f.T' * x_filt
+
+    # Kf doesnt change, so next solves can reuse the factorization
+    set_phase!(f.ps, Pardiso.SOLVE_ITERATIVE_REFINE)
 end
 
 function filter!(x::AbstractVector, weight::AbstractVector, f::PDEFilter)

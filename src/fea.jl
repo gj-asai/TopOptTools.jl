@@ -19,60 +19,80 @@ function ScratchData(model::FEModel, K::SparseMatrixCSC)
     return ScratchData(cell_cache, cellvalues, Ke, jac, asm)
 end
 
-struct FEResults{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,MT<:SparseMatrixCSC{T},SD<:ScratchData}
-    x::VT
+mutable struct FESolver{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,SS<:MKLPardisoSolver,MT<:SparseMatrixCSC{T},SD<:ScratchData}
     model::FEM
+    ps::SS
+    xPhys::VT
 
     K::MT
     f::Vector{T}
+    chnl::Channel{SD}
+
     ∂Ke∂x::Vector{Matrix{T}}
     u::Vector{T}
-    chnl::Channel{SD}
 end
 
-function FEResults(x0::AbstractVector, model::FEModel)
+function FESolver(x0::AbstractVector, model::FEModel)
+    ps = MKLPardisoSolver()
+    set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
+    set_iparm!(ps, 1, 1) # to be able to manually set iparm
+    set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
+
+    reset_timer!(TopOpt.timer)
+
+    # compute RHS, only once assuming loads do not depend on the design
     f = compute_force_vector(model)
     apply!(f, model.ch)
 
     # preallocate stiffness and sensitivities
     n_basefuncs = getnbasefunctions(model.cellvalues)
     K = allocate_matrix(model.dh)
-    ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), get_nvar(model) * getncells(model.grid))
+    ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), length(x0))
 
     # preallocate solution
     u = zeros(ndofs(model.dh))
 
+    # preallocate thread local containers
     chnl = Channel{ScratchData}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
         put!(chnl, ScratchData(model, K))
     end
 
-    return FEResults(copy(x0), model, K, f, ∂Ke∂x, u, chnl)
-end
-
-function fea!(results::FEResults{T}, x::AbstractVector) where {T}
-    @unpack K, f, u = results
-    results.x .= x
-
-    @timeit timer "assemble" begin
-        global_stiffness!(results)
-        apply!(K, results.model.ch)
-    end
-
-    @timeit timer "solve" begin
-        # ps is the MKLPardisoSolver from the module namespace
-        solve!(ps, u, K, f) # solve linear system and store in u
+    solver = FESolver(model, ps, copy(x0), K, f, chnl, ∂Ke∂x, u)
+    finalizer(solver) do x
+        set_phase!(x.ps, Pardiso.RELEASE_ALL)
     end
 end
 
-function global_stiffness!(results::FEResults)
-    @unpack x, K, ∂Ke∂x, chnl = results
-    model = results.model
+function update_xPhys!(solver::FESolver, xPhys::AbstractVector)
+    solver.xPhys .= xPhys
+end
+
+function fea!(solver::FESolver)
+    @unpack K, f, u, ps = solver
+
+    @timeit timer "stiffness assemble" begin
+        global_stiffness!(solver)
+        apply!(K, solver.model.ch)
+    end
+
+    @timeit timer "linear solve" begin
+        # solve linear system and store result in solver.u
+        pardiso(ps, u, tril(K), f)
+
+        # the sparsity pattern of K doesnt change, so next solves can skip the symbolic factorization step
+        set_phase!(ps, Pardiso.NUM_FACT_SOLVE_REFINE)
+    end
+end
+
+function global_stiffness!(solver::FESolver)
+    @unpack xPhys, K, ∂Ke∂x, chnl = solver
+    model = solver.model
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
     nvar = get_nvar(model)
 
-    start_assemble(K) # zero K out
+    start_assemble(K) # zero K out before starting
     for color in model.colors
         @tasks for e in color
             scratch = take!(chnl)
@@ -80,7 +100,7 @@ function global_stiffness!(results::FEResults)
 
             Ferrite.reinit!(cell_cache, e)
             Ferrite.reinit!(cellvalues, cell_cache)
-            xe = element_slice(x, e)
+            xe = element_slice(xPhys, e)
 
             ForwardDiff.jacobian!(jac, (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model), Ke, xe)
             for var_idx = 1:nvar
@@ -145,59 +165,4 @@ function compute_force_vector(model::FEModel)
     end
 
     return f
-end
-
-function stress(results::FEResults)
-    x = results.x
-    @unpack cellvalues, mat_interp, grid, dh = results.model
-    dim = get_dim(results.model)
-
-    qp_global = [
-        [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
-        for _ in 1:getncells(grid)
-    ]
-    qp_material = [
-        [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
-        for _ in 1:getncells(grid)
-    ]
-    qp_vonmises = [
-        [zero(Float64) for _ in 1:getnquadpoints(cellvalues)]
-        for _ in 1:getncells(grid)
-    ]
-    qp_principal = [
-        [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
-        for _ in 1:getncells(grid)
-    ]
-    qp_directions = [
-        [zeros(dim, dim) for _ in 1:getnquadpoints(cellvalues)]
-        for _ in 1:getncells(grid)
-    ]
-
-    for cell in CellIterator(dh)
-        Ferrite.reinit!(cellvalues, cell)
-        e = cellid(cell)
-        cell_global = qp_global[e]
-        cell_material = qp_material[e]
-        cell_vonmises = qp_vonmises[e]
-        cell_principal = qp_principal[e]
-        cell_directions = qp_directions[e]
-        for q_point in 1:getnquadpoints(cellvalues)
-            xe = element_slice(x, e)
-            ε = function_symmetric_gradient(cellvalues, q_point, results.u, celldofs(cell))
-            σ = interpolate(xe, mat_interp) ⊡ ε
-            s = dev(σ)
-
-            cell_global[q_point] = σ
-            cell_material[q_point] = rotate_stress(σ, xe, mat_interp)
-            cell_vonmises[q_point] = sqrt(1.5 * s ⊡ s)
-
-            # sort eigenvalues by absolute value, largest first
-            principal = eigen(σ)
-            principal_order = sortperm(abs.(principal.values), rev=true)
-            cell_principal[q_point] = diagm(SymmetricTensor{2,dim}, principal.values[principal_order])
-            cell_directions[q_point] = principal.vectors[:, principal_order]
-        end
-    end
-
-    return qp_global, qp_material, qp_vonmises, qp_principal, qp_directions
 end
