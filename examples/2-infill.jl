@@ -97,8 +97,7 @@ function infill(vol_local, rρ, rlocal)
             loopbeta += 1
 
             # FE analysis
-            update_xPhys!(fesolver, xPhys)
-            fea!(fesolver)
+            fea!(fesolver, xPhys)
 
             @timeit "sensitivity analysis" begin
                 # Objective function: compliance

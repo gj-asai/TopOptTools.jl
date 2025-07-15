@@ -204,8 +204,7 @@ function geometry_projection(volfrac; filename=nothing)
             end
 
             # FE analysis
-            update_xPhys!(fesolver, dens_c)
-            fea!(fesolver)
+            fea!(fesolver, dens_c)
 
             @timeit "sensitivity analysis" begin
                 # Objective: compliance

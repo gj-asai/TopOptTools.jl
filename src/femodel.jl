@@ -1,6 +1,12 @@
+"""
+Type that defines how the design variables are interpolated for the element stiffness matrix
+
+Every new optimization should define a subtype of `MaterialInterpolation` and the respective `interpolate(::AbstractVector, ::MaterialInterpolation)` method
+"""
 abstract type MaterialInterpolation{nvar,T<:Real} end
 interpolate(::AbstractVector, interp::MaterialInterpolation) = throw("Method TopOpt.interpolate(::AbstractVector, ::$(typeof(interp))) is not defined")
 
+"Struct that holds the geometric, material and boundary conditions data of a finite element model"
 struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},BT<:BallTree,CV<:CellValues,FV<:FacetValues,IP<:Interpolation,QR<:QuadratureRule}
     grid::G
     balltree::BT
@@ -21,6 +27,13 @@ struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{di
     colors::Vector{Vector{Int}}
 end
 
+"""
+     FEModel(; grid::Grid, ip::Interpolation, qr::QuadratureRule, mat_interp::MaterialInterpolation, constraints::Vector{Dirichlet}, loads::Vector{<:Load}) 
+
+Creates the finite element model and also computes the element volumes,
+a coloring of the grid for parallel assemble and
+the data structure for efficient filter generation
+"""
 function FEModel(;
     grid::Grid{dim},
     ip::Interpolation,
@@ -71,5 +84,8 @@ function FEModel(;
     return FEModel(grid, tree, centers, elemvol, mat_interp, constraints, loads, cellvalues, facetvalues, ip, qr, dh, ch, colors)
 end
 
-get_dim(::FEModel{dim}) where {dim} = dim
+# get the number of design variables per finite element in the FEModel
 get_nvar(::FEModel{dim,nvar}) where {dim,nvar} = nvar
+
+# get dimensionality of the FEModel
+get_dim(::FEModel{dim}) where {dim} = dim

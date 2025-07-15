@@ -4,6 +4,11 @@ mutable struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,SS<:MKLPardisoS
     ps::SS
 end
 
+"""
+    PDEFilter(radius::Float64, model::FEModel)
+
+Creates an isotropic Helmholtz PDE filter of radius `radius` for the mesh stored in `model`
+"""
 function PDEFilter(radius::Float64, model::FEModel)
     @unpack ip, qr, grid = model
 
@@ -58,6 +63,11 @@ function PDEFilter(radius::Float64, model::FEModel)
     end
 end
 
+"""
+    filter!(x::AbstractVector, f::PDEFilter)
+
+In-place filtering of `x`
+"""
 function filter!(x::AbstractVector, f::PDEFilter)
     x_filt = Vector{Float64}(undef, size(f.T, 1))
     pardiso(f.ps, x_filt, f.Kf, f.T * x)
@@ -67,6 +77,12 @@ function filter!(x::AbstractVector, f::PDEFilter)
     set_phase!(f.ps, Pardiso.SOLVE_ITERATIVE_REFINE)
 end
 
+"""
+    filter!(x::AbstractVector, weight::AbstractVector, f::PDEFilter)
+
+In-place filtering of `x` using weights `weight`:
+weight * xfiltered = H * (weight * x)
+"""
 function filter!(x::AbstractVector, weight::AbstractVector, f::PDEFilter)
     x .*= weight
     filter!(x, f)

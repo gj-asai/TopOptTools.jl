@@ -83,8 +83,7 @@ function somp(volfrac, rρ, rθ, angle=0)
         maxiter = 1000
         for loop in 1:maxiter+1
             # FE analysis
-            update_xPhys!(fesolver, x)
-            fea!(fesolver)
+            fea!(fesolver, x)
 
             @timeit "sensitivity analysis" begin
                 # Objective function: compliance

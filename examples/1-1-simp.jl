@@ -2,7 +2,7 @@
 MBB beam optimization using sensitivity filter
 
 Follows the structure of
-E. Andreassen, A. Clausen, M. Schevenels, B. S. Lazarov, B. S. and O. Sigmund
+E. Andreassen, A. Clausen, M. Schevenels, B. S. Lazarov and O. Sigmund
 Efficient topology optimization in MATLAB using 88 lines of code
 Structural and Multidisciplinary Optimization (2011)
 """
@@ -81,8 +81,7 @@ function simp1(volfrac, rρ)
         maxiter = 500
         for loop in 1:maxiter+1
             # FE analysis
-            update_xPhys!(fesolver, x)
-            fea!(fesolver)
+            fea!(fesolver, x)
 
             @timeit "sensitivity analysis" begin
                 # Objective function: compliance

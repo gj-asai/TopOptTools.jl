@@ -2,6 +2,11 @@ struct ConvolutionFilter{TH<:SparseMatrixCSC}
     H::TH
 end
 
+"""
+    ConvolutionFilter(radius::Float64, model::FEModel)
+
+Computes the weights of a convolution filter of radius `radius` for the mesh stored in `model`
+"""
 function ConvolutionFilter(radius::Float64, model::FEModel)
     n = getncells(model.grid)
 
@@ -34,10 +39,21 @@ function ConvolutionFilter(radius::Float64, model::FEModel)
     return ConvolutionFilter(H)
 end
 
+"""
+    filter!(x::AbstractVector, f::ConvolutionFilter)
+
+In-place filtering of `x`
+"""
 function filter!(x::AbstractVector, f::ConvolutionFilter)
     x .= f.H * x
 end
 
+"""
+    filter!(x::AbstractVector, weight::AbstractVector, f::ConvolutionFilter)
+
+In-place filtering of `x` using weights `weight`:
+weight * xfiltered = H * (weight * x)
+"""
 function filter!(x::AbstractVector, weight::AbstractVector, f::ConvolutionFilter)
     x .*= weight
     filter!(x, f)

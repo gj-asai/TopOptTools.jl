@@ -1,4 +1,5 @@
 # task local data for parallel stiffness assemble
+# IMPORTANT: each task works with its own copy of cellvalues and creates a local CellCache
 struct ScratchData{CC,CV,T,A}
     cell_cache::CC
     cellvalues::CV
@@ -7,18 +8,23 @@ struct ScratchData{CC,CV,T,A}
     assembler::A
 end
 
-function ScratchData(model::FEModel, K::SparseMatrixCSC)
+function ScratchData(model::FEModel{dim,nvar}, K::SparseMatrixCSC) where {dim,nvar}
     cell_cache = CellCache(model.dh)
     cellvalues = copy(model.cellvalues)
 
     n_basefuncs = getnbasefunctions(cellvalues)
     Ke = zeros(n_basefuncs, n_basefuncs)
-    jac = zeros(n_basefuncs * n_basefuncs, get_nvar(model))
+    jac = zeros(n_basefuncs * n_basefuncs, nvar)
 
     asm = start_assemble(K; fillzero=false)
     return ScratchData(cell_cache, cellvalues, Ke, jac, asm)
 end
 
+"""
+Contains the data necessary for the linear system solve and stores the results
+
+Need to be mutable to allow a finalizer to be set. It will tell Pardiso to free all memory when the optimization is done
+"""
 mutable struct FESolver{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,SS<:MKLPardisoSolver,MT<:SparseMatrixCSC{T},SD<:ScratchData}
     model::FEM
     ps::SS
@@ -32,6 +38,13 @@ mutable struct FESolver{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,SS<:MKLPardis
     u::Vector{T}
 end
 
+"""
+    FESolver(x0::AbstractVector, model::FEModel)
+
+Creates a new `FESolver` with the design variables initialized at `x0`
+
+# NOTE: resets `TopOpt.timer`
+"""
 function FESolver(x0::AbstractVector, model::FEModel)
     ps = MKLPardisoSolver()
     set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
@@ -40,7 +53,7 @@ function FESolver(x0::AbstractVector, model::FEModel)
 
     reset_timer!(TopOpt.timer)
 
-    # compute RHS, only once assuming loads do not depend on the design
+    # compute RHS, only done once assuming loads do not depend on the design
     f = compute_force_vector(model)
     apply!(f, model.ch)
 
@@ -59,15 +72,23 @@ function FESolver(x0::AbstractVector, model::FEModel)
     end
 
     solver = FESolver(model, ps, copy(x0), K, f, chnl, ∂Ke∂x, u)
-    finalizer(solver) do x
-        set_phase!(x.ps, Pardiso.RELEASE_ALL)
+    finalizer(solver) do s
+        set_phase!(s.ps, Pardiso.RELEASE_ALL)
     end
 end
 
-function update_xPhys!(solver::FESolver, xPhys::AbstractVector)
-    solver.xPhys .= xPhys
-end
+"""
+    fea!(solver::FESolver[, x::AbstractVector])
 
+Solves the finite element problem with variables `x` and overwrites the results to the memory preallocated in `solver`
+
+If `x` is not given, it uses the same values already stored in `solver`
+If `x` is not a `DesignVector`, it assumes that each finite element is represented by a single design variable
+"""
+function fea!(solver::FESolver, x::AbstractVector)
+    solver.xPhys .= x
+    fea!(solver)
+end
 function fea!(solver::FESolver)
     @unpack K, f, u, ps = solver
 
@@ -102,6 +123,10 @@ function global_stiffness!(solver::FESolver)
             Ferrite.reinit!(cellvalues, cell_cache)
             xe = element_slice(xPhys, e)
 
+            # this updates Ke and obtains ∂Ke∂x via automatic differentiation
+            # uses forward mode because the number of outputs is in general larger than the number of inputs:
+            # Inputs: nvar
+            # Outputs: entries of Ke, e.g. 64 for 2D linear quadrilateral elements
             ForwardDiff.jacobian!(jac, (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model), Ke, xe)
             for var_idx = 1:nvar
                 ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
@@ -113,6 +138,7 @@ function global_stiffness!(solver::FESolver)
     end
 end
 
+# xe is a view of the design vector that contains the variables corresponding to one element
 function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellValues, model::FEModel) where {T<:Real}
     fill!(Ke, zero(T))
 
@@ -132,9 +158,8 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
     end
 end
 
-function compute_force_vector(model::FEModel)
+function compute_force_vector(model::FEModel{dim}) where {dim}
     f = zeros(ndofs(model.dh))
-    dim = get_dim(model)
 
     # nodal forces
     for cell in CellIterator(model.dh)

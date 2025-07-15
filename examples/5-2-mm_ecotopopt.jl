@@ -139,8 +139,7 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
             continuation_iter += 1
 
             # FE analysis
-            update_xPhys!(fesolver, xPhys)
-            fea!(fesolver)
+            fea!(fesolver, xPhys)
 
             @timeit "sensitivity analysis" begin
                 # Objective: CO2 impact

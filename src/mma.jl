@@ -1,3 +1,6 @@
+"""
+Preallocates all memory used by the MMA solver
+"""
 struct MMAWorkspace
     opt::Opt
     asyinit::Float64
@@ -20,6 +23,12 @@ struct MMAWorkspace
     lowsub::Vector{Float64}
     uppsub::Vector{Float64}
 end
+
+"""
+    MMAWorkspace(m::Int, n::Int; asyinit=0.5, asyincr=1.2, asydecr=0.7, move=0.5)
+
+Prepares an optimization with `m` constraints and `n` design variables.
+"""
 function MMAWorkspace(m::Int, n::Int; asyinit=0.5, asyincr=1.2, asydecr=0.7, move=0.5)
     opt = Opt(:LD_CCSAQ, n + m + 1)
     xtol_rel!(opt, 1e-5)
@@ -34,8 +43,14 @@ function MMAWorkspace(m::Int, n::Int; asyinit=0.5, asyincr=1.2, asydecr=0.7, mov
     )
 end
 
-# this function uses an algorithm from NLopt to solve the subproblem efficiently
-# it is not used for the main optimization because we want control of what happens after a single iteration
+"""
+    mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx, a0, a, c, d)
+
+Returns the updated value of the design variables
+
+It uses an algorithm from `NLopt` to solve the subproblem efficiently
+`NLopt`'s MMA is not used for the main optimization because we want control of what happens after a single iteration
+"""
 function mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx, a0, a, c, d)
     @unpack opt, asyinit, asyincr, asydecr, move = workspace
     @unpack low, upp, alfa, beta = workspace
@@ -95,6 +110,7 @@ function mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0va
     end
 
     # solve subproblem with NLopt
+    # TODO: this might not be the best solver for here
     remove_constraints!(opt)
     lower_bounds!(opt, lowsub)
     upper_bounds!(opt, uppsub)
@@ -107,6 +123,7 @@ function mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0va
     return @view(xsub[1:n])
 end
 
+# current convex approximation of the objective function
 function sub_obj(in::Vector, grad::Vector, n, m, low, upp, p0, q0, a0, c, d)
     x = @view(in[1:n])
     y = @view(in[n+1:n+m])
@@ -132,6 +149,7 @@ function sub_obj(in::Vector, grad::Vector, n, m, low, upp, p0, q0, a0, c, d)
     return f0
 end
 
+# current convex approximation of the i-th constraint function
 function sub_cons(in::Vector, grad::Vector, i, n, m, low, upp, p, q, r, a)
     x = @view(in[1:n])
     y = @view(in[n+1:n+m])

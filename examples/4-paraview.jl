@@ -23,7 +23,7 @@ TopOpt.interpolate(xe::AbstractVector, somp::SOMP) = xe[1]^somp.penal * rotate(s
 function stress(solver::FESolver)
     x = solver.xPhys
     @unpack cellvalues, mat_interp, grid, dh = solver.model
-    dim = get_dim(solver.model)
+    dim = TopOpt.get_dim(solver.model)
 
     qp_global = [
         [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
@@ -147,8 +147,7 @@ function somp_paraview(volfrac, rρ, rθ, angle=0; filename=nothing)
         maxiter = 1000
         for loop in 1:maxiter+1
             # FE analysis
-            update_xPhys!(fesolver, x)
-            fea!(fesolver)
+            fea!(fesolver, x)
 
             @timeit "stresses" begin
                 qp_global, qp_material, qp_vonmises, qp_principalstress, qp_principaldir = stress(fesolver)
