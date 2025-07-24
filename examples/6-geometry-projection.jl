@@ -6,7 +6,7 @@ Structural and Multidisciplinary Optimization, 2020
 """
 
 using Ferrite, FerriteGmsh, UnPack, LinearAlgebra
-using TimerOutputs, Printf, WriteVTK, JLD2
+using TimerOutputs, Printf, WriteVTK, HDF5
 using TopOpt
 
 struct Linear{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
@@ -264,8 +264,11 @@ function geometry_projection(volfrac; filename=nothing)
     finally
         !isnothing(filename) && @timeit "export" begin
             # history
-            save("$(filename).jld2", "history", history)
-            @info "Saved file $(filename).jld2"
+            h5open(filename * ".h5", "w") do file
+                write(file, "objective", history[:objective])
+                write(file, "constraint", reduce(hcat, history[:constraint]))
+            end
+            @info "Saved file $(filename).h5"
 
             # paraview .pvd
             vtk_save(pvd)

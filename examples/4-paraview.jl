@@ -10,7 +10,7 @@ Stress calculations are not optimized and are performed (relatively slowly) ever
 # TODO: plotting is missing the material orientations
 
 using Ferrite, FerriteGmsh, UnPack
-using TimerOutputs, Printf, WriteVTK, JLD2, GLMakie
+using TimerOutputs, Printf, WriteVTK, HDF5, GLMakie
 using TopOpt
 
 struct SOMP{dim,T<:Real,CT} <: MaterialInterpolation{2,T}
@@ -229,8 +229,11 @@ function somp_paraview(volfrac, rρ, rθ, angle=0; filename=nothing)
     finally
         !isnothing(filename) && @timeit "export" begin
             # history
-            save("$(filename).jld2", "history", history)
-            @info "Saved file $(filename).jld2"
+            h5open(filename * ".h5", "w") do file
+                write(file, "objective", history[:objective])
+                write(file, "constraint", reduce(hcat, history[:constraint]))
+            end
+            @info "Saved file $(filename).h5"
 
             # paraview .pvd
             vtk_save(pvd)

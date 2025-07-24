@@ -20,7 +20,7 @@ Constraint: max compliance
 """
 
 using Ferrite, FerriteGmsh, UnPack
-using TimerOutputs, Printf, WriteVTK, JLD2
+using TimerOutputs, Printf, WriteVTK, HDF5
 using TopOpt
 
 mutable struct MMSOMP{dim,M,N,T<:Real,CT} <: MaterialInterpolation{N,T}
@@ -272,8 +272,14 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
     finally
         !isnothing(filename) && @timeit "export" begin
             # history
-            save("$(filename).jld2", "history", history)
-            @info "Saved file $(filename).jld2"
+            h5open(filename * ".h5", "w") do file
+                write(file, "beta", history[:beta])
+                write(file, "penal", history[:penal])
+                write(file, "objective", history[:objective])
+                write(file, "constraint", reduce(hcat, history[:constraint]))
+                write(file, "volfracs", reduce(hcat, history[:volfracs]))
+            end
+            @info "Saved file $(filename).h5"
 
             # final design
             save("$(filename).design.jld2", "xPhys", xPhys)
