@@ -20,7 +20,7 @@ Constraint: max compliance
 """
 
 using Ferrite, FerriteGmsh, UnPack
-using TimerOutputs, Printf, WriteVTK, HDF5
+using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
 using TopOpt
 
 mutable struct MMSOMP{dim,M,N,T<:Real,CT} <: MaterialInterpolation{N,T}
@@ -49,7 +49,7 @@ end
 rotate_mmsomp(mat::Material{2}, θ) = rotate(mat.C, θ)
 rotate_mmsomp(mat::Material{3}, θ) = rotate(mat.C, Vec{3}((0.0, 0.0, 1.0)), θ)
 
-function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
+function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
     reset_timer!()
     !isnothing(filename) && (pvd = paraview_collection(filename))
 
@@ -125,8 +125,8 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
 
     # initialize MMA
     m, n = 2, length(x)
-    mma = MMAWorkspace(m, n, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.45)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
+    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.45)
     xold1, xold2 = similar(x), similar(x)
 
     beta = 1
@@ -246,7 +246,6 @@ function mm_ecotopopt2(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
                 xnew = mma_update!(mma, m, n, continuation_iter,
                     x, x.lim_inf, x.lim_sup, xold1, xold2,
                     CO2 / CO2_ini, dCO2dx / CO2_ini, g, dgdx',
-                    a0mma, amma, cmma, dmma
                 )
                 xold2 .= xold1
                 xold1 .= x

@@ -1,7 +1,8 @@
 module TopOpt
 
-using MKL, Pardiso,
-    NLopt,
+using MKL
+using Pardiso,
+    JuMP, Ipopt,
     Ferrite,
     Tensors,
     LinearAlgebra,

@@ -91,7 +91,7 @@ function geometry_projection(volfrac; filename=nothing)
     m, n = 1, length(z)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
     zold1, zold2 = similar(z), similar(z)
-    mma = MMAWorkspace(m, n; move=0.01)
+    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma; move=0.01)
 
     # geometry projection parameters
     ρmin = 1e-2
@@ -244,14 +244,13 @@ function geometry_projection(volfrac; filename=nothing)
                 end
             end
 
-            change < 1e-2 && break
+            change < 1e-3 && break
 
             # MMA update
             @timeit "mma update" begin
                 znew = mma_update!(mma, m, n, loop,
                     z, z.lim_inf, z.lim_sup, zold1, zold2,
-                    c, dcdz, g, dgdz',
-                    a0mma, amma, cmma, dmma
+                    c, dcdz, g, dgdz'
                 )
                 zold2 .= zold1
                 zold1 .= z

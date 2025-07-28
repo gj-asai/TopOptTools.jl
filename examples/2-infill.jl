@@ -78,7 +78,7 @@ function infill(vol_local, rρ, rlocal)
     m, n = 1, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
     xold1, xold2 = similar(x), similar(x)
-    mma = MMAWorkspace(m, n, asyinit=0.5, asyincr=1.07, asydecr=0.65, move=0.01)
+    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma, asyinit=0.5, asyincr=1.07, asydecr=0.65, move=0.01)
 
     beta = 1.0
     eta = 0.5
@@ -145,8 +145,7 @@ function infill(vol_local, rρ, rlocal)
             @timeit "mma update" begin
                 xnew = mma_update!(mma, m, n, loopbeta,
                     x, x.lim_inf, x.lim_sup, xold1, xold2,
-                    c, dcdx, g, dgdx',
-                    a0mma, amma, cmma, dmma)
+                    c, dcdx, g, dgdx')
                 xold2 .= xold1
                 xold1 .= x
                 x .= xnew
