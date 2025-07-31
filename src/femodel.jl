@@ -47,7 +47,7 @@ function FEModel(;
 
     qr_order = length(Ferrite.getpoints(qr))
     face_qr = FacetQuadratureRule{shape}(qr_order)
-    facetvalues = FacetValues(face_qr, ip^(dim - 1))
+    facetvalues = FacetValues(face_qr, ip^dim)
     colors = create_coloring(grid) # coloring for parallel assemble
 
     # degrees of freedom

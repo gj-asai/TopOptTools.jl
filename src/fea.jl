@@ -160,32 +160,39 @@ end
 
 function compute_force_vector(model::FEModel{dim}) where {dim}
     f = zeros(ndofs(model.dh))
+    fe = zeros(getnbasefunctions(model.facetvalues))
 
-    # nodal forces
     for cell in CellIterator(model.dh)
         dofs = celldofs(cell)
-        for (i, node) in enumerate(getnodes(cell)), force in model.loads
-            force isa NodalLoad || continue
-            node in getnodeset(model.grid, force.nodeset_name) || continue
-            f[dofs[dim*(i-1)+1:dim*i]] .+= force.F
-        end
-    end
 
-    # linear forces
-    fe = zeros(getnbasefunctions(model.facetvalues))
-    for force in model.loads
-        force isa LinearLoad || continue
-        for facet in FacetIterator(model.dh, force.faceset_name)
-            Ferrite.reinit!(model.facetvalues, facet)
+        # nodal forces
+        for force in model.loads
+            force isa NodalLoad || continue
+
+            for (i, node) in enumerate(getnodes(cell))
+                node in getnodeset(model.grid, force.nodeset_name) || continue
+                f[dofs[dim*(i-1)+1:dim*i]] .+= force.F
+            end
+        end
+
+        # linear forces
+        for force in model.loads
+            force isa LinearLoad || continue
+
             fill!(fe, 0.0)
-            for q_point in 1:getnquadpoints(model.facetvalues)
-                dΓ = getdetJdV(model.facetvalues, q_point)
-                for i in 1:getnbasefunctions(model.facetvalues)
-                    δu = shape_value(model.facetvalues, q_point, i)
-                    fe[i] += (δu ⋅ force.F) * dΓ
+            for facet in 1:nfacets(cell)
+                (cellid(cell), facet) in getfacetset(model.grid, force.faceset_name) || continue
+
+                Ferrite.reinit!(model.facetvalues, cell, facet)
+                for q_point in 1:getnquadpoints(model.facetvalues)
+                    dΓ = getdetJdV(model.facetvalues, q_point)
+                    for i in 1:getnbasefunctions(model.facetvalues)
+                        δu = shape_value(model.facetvalues, q_point, i)
+                        fe[i] += (δu ⋅ force.F) * dΓ
+                    end
                 end
             end
-            assemble!(f, celldofs(facet), fe)
+            assemble!(f, dofs, fe)
         end
     end
 
