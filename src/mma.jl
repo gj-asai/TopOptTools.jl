@@ -1,9 +1,7 @@
 """
 Preallocates all memory used by the MMA solver
 """
-struct MMAWorkspace{M<:JuMP.Model}
-    model::M
-
+struct MMAWorkspace
     asyinit::Float64
     asyincr::Float64
     asydecr::Float64
@@ -34,37 +32,8 @@ Prepares an optimization with `m` constraints and `n` design variables.
 `a0`, `a`, `c` and `d` are MMA parameters
 """
 function MMAWorkspace(m::Int, n::Int, a0, a, c, d; asyinit=0.5, asyincr=1.2, asydecr=0.7, move=0.5)
-    model = Model(Ipopt.Optimizer)
-    set_silent(model)
-    set_string_names_on_creation(model, false)
-    set_attribute(model, "tol", 1e-2)
-    set_attribute(model, "dual_inf_tol", 1e-2)
-    set_attribute(model, "constr_viol_tol", 1e-2)
-    set_attribute(model, "compl_inf_tol", 1e-2)
-    set_attribute(model, "linear_solver", "spral")
-
-    @variable(model, x[1:n])
-    @variable(model, 0 <= y[1:m], start = 1.0)
-    @variable(model, 0 <= z, start = 1.0)
-    @variables(model, begin
-        p0[1:n] in Parameter(0.0)
-        q0[1:n] in Parameter(0.0)
-        p[1:m, 1:n] in Parameter(0.0)
-        q[1:m, 1:n] in Parameter(0.0)
-        r[1:m] in Parameter(0.0)
-        upp[1:n] in Parameter(0.0)
-        low[1:n] in Parameter(0.0)
-    end)
-
-    @objective(model, Min,
-        sum(p0[j] / (upp[j] - x[j]) + q0[j] / (x[j] - low[j]) for j in 1:n) + a0 * z + sum(c[i] * y[i] + 0.5 * d[i] * y[i]^2 for i in 1:m)
-    )
-    @constraint(model, cons[i = 1:m],
-        sum(p[i, j] / (upp[j] - x[j]) + q[i, j] / (x[j] - low[j]) for j in 1:n) - a[i] * z - y[i] + r[i] <= 0
-    )
-
     MMAWorkspace(
-        model, asyinit, asyincr, asydecr, move, a0, a, c, d,
+        asyinit, asyincr, asydecr, move, a0, a, c, d,
         Vector{Float64}(undef, n), Vector{Float64}(undef, n), Vector{Float64}(undef, n), Vector{Float64}(undef, n),
         Vector{Float64}(undef, n), Vector{Float64}(undef, n),
         Matrix{Float64}(undef, m, n), Matrix{Float64}(undef, m, n), Vector{Float64}(undef, m),
@@ -76,10 +45,10 @@ end
 
 Returns the updated value of the design variables
 
-The subproblem is defined in a `JuMP` model and solved using `Ipopt`
+The subproblem is solved using a dual method
 """
 function mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx)
-    @unpack model, asyinit, asyincr, asydecr, move = workspace
+    @unpack a0, a, c, d, asyinit, asyincr, asydecr, move = workspace
     @unpack low, upp, alfa, beta = workspace
     @unpack p0, q0, p, q, r = workspace
 
@@ -130,26 +99,34 @@ function mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0va
         end
     end
 
-    # update the subproblem model
-    for j in 1:n
-        set_lower_bound(model[:x][j], alfa[j])
-        set_upper_bound(model[:x][j], beta[j])
-        set_start_value(model[:x][j], 0.5 * (alfa[j] + beta[j]))
-        set_parameter_value(model[:upp][j], upp[j])
-        set_parameter_value(model[:low][j], low[j])
-        set_parameter_value(model[:p0][j], p0[j])
-        set_parameter_value(model[:q0][j], q0[j])
-    end
-    for i in 1:m
-        set_parameter_value(model[:r][i], r[i])
-    end
-    for i in 1:m, j in 1:n
-        set_parameter_value(model[:p][i, j], p[i, j])
-        set_parameter_value(model[:q][i, j], q[i, j])
+    # TODO: this can still be improved with some caching
+    function primal(lambda)
+        plam = sqrt.(p0 + p' * lambda)
+        qlam = sqrt.(q0 + q' * lambda)
+        x = @. max(alfa, min((plam * low + qlam * upp) / (plam + qlam), beta))
+        y = @. max(0, lambda - c)
+        z = max(0, lambda ⋅ a - 1.0)
+        return x, y, z
     end
 
-    # solve the subproblem
-    optimize!(model)
-    assert_is_solved_and_feasible(model) # should only error if the solver was interrupted
-    return value(model[:x])
+    function dual_obj(lambda)
+        x, y, z = primal(lambda)
+        Lx = sum(p0[j] / (upp[j] - x[j]) + q0[j] / (x[j] - low[j]) for j in 1:n) +
+             sum(lambda[i] * (sum((p[i, j] / (upp[j] - x[j]) + q[i, j] / (x[j] - low[j])) for j in 1:n) + r[i]) for i in 1:m)
+        Ly = sum(c[i] * y[i] + y[i]^2 / 2 - lambda[i] * y[i] for i in 1:m)
+        Lz = z + z^2 / 2 - lambda ⋅ a * z
+        return -(Lx + Ly + Lz) # flipping the sign because we want to maximize the objective
+    end
+
+    function dual_jac!(J, lambda)
+        x, y, z = primal(lambda)
+        for i in 1:m
+            J[i] = sum((p[i, j] / (upp[j] - x[j]) + q[i, j] / (x[j] - low[j])) for j in 1:n) + r[i] - a[i] * z - y[i]
+        end
+        J .*= -1.0 # because we flipped the sign of the objective
+    end
+
+    res = optimize(dual_obj, dual_jac!, zeros(m), fill(Inf, m), ones(m))
+    lambda = Optim.minimizer(res)
+    return primal(lambda)[1]
 end
