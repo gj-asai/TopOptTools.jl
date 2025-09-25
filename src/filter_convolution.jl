@@ -7,7 +7,7 @@ end
 
 Computes the weights of a convolution filter of radius `radius` for the mesh stored in `model`
 """
-function ConvolutionFilter(radius::Float64, model::FEModel)
+function ConvolutionFilter(radius, model::FEModel)
     n = getncells(model.grid)
 
     radius == 0 && return ConvolutionFilter(sparse(I, n, n))

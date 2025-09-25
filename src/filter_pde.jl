@@ -9,7 +9,7 @@ end
 
 Creates an isotropic Helmholtz PDE filter of radius `radius` for the mesh stored in `model`
 """
-function PDEFilter(radius::Float64, model::FEModel)
+function PDEFilter(radius, model::FEModel)
     @unpack ip, qr, grid = model
 
     r_filter = radius / (2 * sqrt(3))
