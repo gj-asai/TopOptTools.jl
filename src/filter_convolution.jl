@@ -13,7 +13,7 @@ function ConvolutionFilter(radius, model::FEModel)
     radius == 0 && return ConvolutionFilter(sparse(I, n, n))
 
     centers = model.centers
-    iH, jH = Int[], Int[]
+    iH, jH = Int32[], Int32[]
     sH = Float64[]
 
     tmp_s = Float64[]
