@@ -17,7 +17,7 @@ export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D,
     NodalLoad, LinearLoad,
     MaterialInterpolation, FEModel,
     DesignVector, MMAWorkspace, mma_update!,
-    FESolver, fea!,
+    FESolver, fea!, update_stiffness!, compute_force_vector,
     ConvolutionFilter, PDEFilter, filter!,
     project_heaviside!, project_heaviside_derivative!
 

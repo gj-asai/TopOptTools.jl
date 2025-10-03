@@ -31,7 +31,6 @@ mutable struct FESolver{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,SS<:MKLPardis
     xPhys::VT
 
     K::MT
-    f::Vector{T}
     chnl::Channel{SD}
 
     ∂Ke∂x::Vector{Matrix{T}}
@@ -53,10 +52,6 @@ function FESolver(x0::AbstractVector, model::FEModel)
 
     reset_timer!(TopOpt.timer)
 
-    # compute RHS, only done once assuming loads do not depend on the design
-    f = compute_force_vector(model)
-    apply!(f, model.ch)
-
     # preallocate stiffness and sensitivities
     n_basefuncs = getnbasefunctions(model.cellvalues)
     K = allocate_matrix(model.dh)
@@ -71,7 +66,7 @@ function FESolver(x0::AbstractVector, model::FEModel)
         put!(chnl, ScratchData(model, K))
     end
 
-    solver = FESolver(model, ps, copy(x0), K, f, chnl, ∂Ke∂x, u)
+    solver = FESolver(model, ps, copy(x0), K, chnl, ∂Ke∂x, u)
     finalizer(solver) do s
         set_phase!(s.ps, Pardiso.RELEASE_ALL)
     end
@@ -85,30 +80,23 @@ Solves the finite element problem with variables `x` and overwrites the results 
 If `x` is not given, it uses the same values already stored in `solver`
 If `x` is not a `DesignVector`, it assumes that each finite element is represented by a single design variable
 """
-function fea!(solver::FESolver, x::AbstractVector)
-    solver.xPhys .= x
-    fea!(solver)
-end
-function fea!(solver::FESolver)
-    @unpack K, f, u, ps = solver
+function fea!(solver::FESolver, f::AbstractVector)
+    @unpack K, u, ps = solver
 
-    @timeit timer "stiffness assemble" begin
-        global_stiffness!(solver)
-        apply!(K, solver.model.ch)
-    end
+    # solve linear system and store result in solver.u
+    pardiso(ps, u, tril(K), f)
 
-    @timeit timer "linear solve" begin
-        # solve linear system and store result in solver.u
-        pardiso(ps, u, tril(K), f)
-
-        # the sparsity pattern of K doesnt change, so next solves can skip the symbolic factorization step
-        set_phase!(ps, Pardiso.NUM_FACT_SOLVE_REFINE)
-    end
+    # the sparsity pattern of K doesnt change, so next solves can skip the symbolic factorization step
+    # this is also the best option if K is exactly the same as in the previous solve
+    set_phase!(ps, Pardiso.NUM_FACT_SOLVE_REFINE)
 end
 
-function global_stiffness!(solver::FESolver)
-    @unpack xPhys, K, ∂Ke∂x, chnl = solver
+# TODO: write docstring
+function update_stiffness!(solver::FESolver, x::AbstractVector)
+    @unpack xPhys, K, ∂Ke∂x, chnl, ps = solver
     model = solver.model
+
+    xPhys .= x
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
     nvar = get_nvar(model)
@@ -136,6 +124,9 @@ function global_stiffness!(solver::FESolver)
             put!(chnl, scratch)
         end
     end
+
+    # apply boundary conditions
+    apply!(K, model.ch)
 end
 
 # xe is a view of the design vector that contains the variables corresponding to one element
@@ -158,7 +149,8 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
     end
 end
 
-function compute_force_vector(model::FEModel{dim}) where {dim}
+# TODO: write docstring
+function compute_force_vector(loads::Vector{<:Load}, model::FEModel{dim}) where {dim}
     f = zeros(ndofs(model.dh))
     fe = zeros(getnbasefunctions(model.facetvalues))
 
@@ -166,7 +158,7 @@ function compute_force_vector(model::FEModel{dim}) where {dim}
         dofs = celldofs(cell)
 
         # nodal forces
-        for force in model.loads
+        for force in loads
             force isa NodalLoad || continue
 
             for (i, node) in enumerate(getnodes(cell))
@@ -176,7 +168,7 @@ function compute_force_vector(model::FEModel{dim}) where {dim}
         end
 
         # linear forces
-        for force in model.loads
+        for force in loads
             force isa LinearLoad || continue
 
             fill!(fe, 0.0)
@@ -196,5 +188,6 @@ function compute_force_vector(model::FEModel{dim}) where {dim}
         end
     end
 
+    apply!(f, model.ch)
     return f
 end

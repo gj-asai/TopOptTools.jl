@@ -50,7 +50,8 @@ function simp1(volfrac, rρ)
     qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
 
     # FE model
-    model = FEModel(; grid, ip, qr, mat_interp, constraints, loads)
+    model = FEModel(; grid, ip, qr, mat_interp, constraints)
+    f = compute_force_vector(loads, model)
     nelx, nely = [xmax, ymax] / sqrt(model.elemvol[1]) .|> round .|> Int # assuming identical square elements
 
     # initialize design variables
@@ -81,7 +82,8 @@ function simp1(volfrac, rρ)
         maxiter = 500
         for loop in 1:maxiter+1
             # FE analysis
-            fea!(fesolver, x)
+            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, x)
+            @timeit "linear solve" fea!(fesolver, f)
 
             @timeit "sensitivity analysis" begin
                 # Objective function: compliance
@@ -124,8 +126,6 @@ function simp1(volfrac, rρ)
         @warn "Computation interrupted - $(typeof(e))"
         # rethrow()
     finally
-        # timing
-        merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer) # merge time measurements from the FE solver
         print_timer()
     end
 end

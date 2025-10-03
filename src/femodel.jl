@@ -15,7 +15,6 @@ struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{di
 
     mat_interp::interp
     constraints::Vector{Dirichlet}
-    loads::Vector{<:Load{dim,T}}
 
     cellvalues::CV
     facetvalues::FV
@@ -28,7 +27,7 @@ struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{di
 end
 
 """
-     FEModel(; grid::Grid, ip::Interpolation, qr::QuadratureRule, mat_interp::MaterialInterpolation, constraints::Vector{Dirichlet}, loads::Vector{<:Load}) 
+     FEModel(; grid::Grid, ip::Interpolation, qr::QuadratureRule, mat_interp::MaterialInterpolation, constraints::Vector{Dirichlet}) 
 
 Creates the finite element model and also computes the element volumes,
 a coloring of the grid for parallel assemble and
@@ -39,8 +38,7 @@ function FEModel(;
     ip::Interpolation,
     qr::QuadratureRule{shape},
     mat_interp::MaterialInterpolation,
-    constraints::Vector{Dirichlet},
-    loads::Vector{<:Load}
+    constraints::Vector{Dirichlet}
 ) where {dim,shape}
     # element type and quadrature rule
     cellvalues = CellValues(qr, ip^dim)
@@ -81,7 +79,7 @@ function FEModel(;
     end
     tree = BallTree(centers)
 
-    return FEModel(grid, tree, centers, elemvol, mat_interp, constraints, loads, cellvalues, facetvalues, ip, qr, dh, ch, colors)
+    return FEModel(grid, tree, centers, elemvol, mat_interp, constraints, cellvalues, facetvalues, ip, qr, dh, ch, colors)
 end
 
 # get the number of design variables per finite element in the FEModel

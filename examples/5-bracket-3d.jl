@@ -38,7 +38,8 @@ function bracket(volfrac, rρ; filename=nothing)
     qr = QuadratureRule{RefTetrahedron}(2) # 2 point quadrature
 
     # FE model
-    model = FEModel(; grid, ip, qr, mat_interp, constraints, loads)
+    model = FEModel(; grid, ip, qr, mat_interp, constraints)
+    f = compute_force_vector(loads, model)
 
     # initialize design variables
     x = DesignVector(1)
@@ -70,7 +71,8 @@ function bracket(volfrac, rρ; filename=nothing)
         maxiter = 100
         for loop in 1:maxiter+1
             # FE analysis
-            fea!(fesolver, x)
+            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, x)
+            @timeit "linear solve" fea!(fesolver, f)
 
             @timeit "sensitivity analysis" begin
                 # Objective function: compliance
@@ -142,8 +144,6 @@ function bracket(volfrac, rρ; filename=nothing)
             @info "Saved file $(filename).pvd"
         end
 
-        # timing
-        merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer) # merge time measurements from the FE solver
         print_timer()
     end
 end

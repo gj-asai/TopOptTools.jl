@@ -47,7 +47,8 @@ function geometry_projection(volfrac; filename=nothing)
     qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
 
     # FE model
-    model = FEModel(; grid, ip, qr, mat_interp, constraints, loads)
+    model = FEModel(; grid, ip, qr, mat_interp, constraints)
+    f = compute_force_vector(loads, model)
 
     # initial end points of the bars
     points = [
@@ -204,7 +205,8 @@ function geometry_projection(volfrac; filename=nothing)
             end
 
             # FE analysis
-            fea!(fesolver, dens_c)
+            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, dens_c)
+            @timeit "linear solve" fea!(fesolver, f)
 
             @timeit "sensitivity analysis" begin
                 # Objective: compliance
@@ -274,8 +276,6 @@ function geometry_projection(volfrac; filename=nothing)
             @info "Saved file $(filename).pvd"
         end
 
-        # timing
-        merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer) # merge time measurements from the FE solver
         print_timer()
     end
 

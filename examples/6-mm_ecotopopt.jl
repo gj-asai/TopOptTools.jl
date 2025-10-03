@@ -83,7 +83,8 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
     qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
 
     # FE model
-    model = FEModel(; grid, ip, qr, mat_interp, constraints, loads)
+    model = FEModel(; grid, ip, qr, mat_interp, constraints)
+    f = compute_force_vector(loads, model)
 
     # initialize design variables
     nmaterials = length(mat_interp.mat)
@@ -139,7 +140,8 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
             continuation_iter += 1
 
             # FE analysis
-            fea!(fesolver, xPhys)
+            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, xPhys)
+            @timeit "linear solve" fea!(fesolver, f)
 
             @timeit "sensitivity analysis" begin
                 # Objective: CO2 impact
@@ -289,8 +291,6 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
             @info "Saved file $(filename).pvd"
         end
 
-        # timing
-        merge!(TimerOutputs.get_defaulttimer(), TopOpt.timer) # merge time measurements from the FE solver
         print_timer(title="angle=$(angle)")
     end
 end
