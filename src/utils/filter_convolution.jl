@@ -17,7 +17,7 @@ function ConvolutionFilter(radius, model::FEModel)
     sH = Float64[]
 
     tmp_s = Float64[]
-    idx_cols = Int[]
+    idx_cols = Int32[]
     for i in 1:n
         empty!(tmp_s)
         empty!(idx_cols)

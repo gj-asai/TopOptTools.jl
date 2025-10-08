@@ -22,19 +22,16 @@ end
 
 """
 Contains the data necessary for the linear system solve and stores the results
-
-Need to be mutable to allow a finalizer to be set. It will tell Pardiso to free all memory when the optimization is done
 """
-mutable struct FESolver{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,SS<:MKLPardisoSolver,MT<:SparseMatrixCSC{T},SD<:ScratchData}
+struct FESolver{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,SS<:MKLPardisoSolver,MT<:SparseMatrixCSC{T},SD<:ScratchData}
     model::FEM
     ps::SS
-    xPhys::VT
 
+    x::VT
     K::MT
-    chnl::Channel{SD}
-
     ∂Ke∂x::Vector{Matrix{T}}
-    u::Vector{T}
+    solution::Vector{T}
+    chnl::Channel{SD}
 end
 
 """
@@ -54,7 +51,7 @@ function FESolver(x0::AbstractVector, model::FEModel)
     ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), length(x0))
 
     # preallocate solution
-    u = zeros(ndofs(model.dh))
+    solution = zeros(ndofs(model.dh))
 
     # preallocate thread local containers
     chnl = Channel{ScratchData}(Threads.nthreads())
@@ -62,25 +59,19 @@ function FESolver(x0::AbstractVector, model::FEModel)
         put!(chnl, ScratchData(model, K))
     end
 
-    solver = FESolver(model, ps, copy(x0), K, chnl, ∂Ke∂x, u)
-    finalizer(solver) do s
-        set_phase!(s.ps, Pardiso.RELEASE_ALL)
-    end
+    return FESolver(model, ps, copy(x0), K, ∂Ke∂x, solution, chnl)
 end
 
 """
     fea!(solver::FESolver[, x::AbstractVector])
 
 Solves the finite element problem with variables `x` and overwrites the results to the memory preallocated in `solver`
-
-If `x` is not given, it uses the same values already stored in `solver`
-If `x` is not a `DesignVector`, it assumes that each finite element is represented by a single design variable
 """
 function fea!(solver::FESolver, f::AbstractVector)
-    @unpack K, u, ps = solver
+    @unpack K, solution, ps = solver
 
     # solve linear system and store result in solver.u
-    pardiso(ps, u, tril(K), f)
+    pardiso(ps, solution, tril(K), f)
 
     # the sparsity pattern of K doesnt change, so next solves can skip the symbolic factorization step
     # this is also the best option if K is exactly the same as in the previous solve
@@ -88,11 +79,26 @@ function fea!(solver::FESolver, f::AbstractVector)
 end
 
 # TODO: write docstring
-function update_stiffness!(solver::FESolver, x::AbstractVector)
-    @unpack xPhys, K, ∂Ke∂x, chnl, ps = solver
-    model = solver.model
+function adjoint_sensitivities!(dfdx, lambda, displacements, solver)
+    @unpack ∂Ke∂x, model = solver
+    for cell in CellIterator(model.dh)
+        e = cellid(cell)
+        dofs = celldofs(cell)
 
-    xPhys .= x
+        @views ue, lambdae = lambda[dofs], displacements[dofs]
+        nvar = get_nvar(model)
+        for i in 1:nvar
+            dfdx[nvar*(e-1)+i] = -dot(lambdae, ∂Ke∂x[nvar*(e-1)+i], ue)
+        end
+    end
+end
+
+# TODO: write docstring
+function update_stiffness!(solver::FESolver, x::AbstractVector)
+    solver.x .= x
+
+    @unpack x, K, ∂Ke∂x, chnl, ps = solver
+    model = solver.model
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
     nvar = get_nvar(model)
@@ -105,7 +111,8 @@ function update_stiffness!(solver::FESolver, x::AbstractVector)
 
             Ferrite.reinit!(cell_cache, e)
             Ferrite.reinit!(cellvalues, cell_cache)
-            xe = element_slice(xPhys, e)
+
+            xe = @view x[nvar*(e-1)+1:nvar*e]
 
             # this updates Ke and obtains ∂Ke∂x via automatic differentiation
             # uses forward mode because the number of outputs is in general larger than the number of inputs:

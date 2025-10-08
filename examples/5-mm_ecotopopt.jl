@@ -1,25 +1,8 @@
 """
 Multi-material topology optimization for ecoefficiency
-
-Using a three field representation for the densities:
-    - Design variables ∈ [0,1] are filtered using a convolution filter of radius rρ
-    - Filtered field is projected using a smooth Heaviside function, with continuation on its sharpness
-
-Material orientation is represented by one angle ∈ [-π,π]
-    - Filtered using a convolution filter of radius rθ
-
-The interpolated constitutive matrix is given by:
-C = C_void + Σ_i ( xi^p Π_(j≠i) (1 - xj^p) * C_0,i ),
-where:
-C_0,i are the constitutive matrices of each candidate material
-Cvoid is the constitutive matrix of an isotropic material with very low stiffness
-p is similar to SIMP penalization, to which a continuation is applied starting from 1 and increasing to 3 in steps of 1
-
-Objective function: CO2 impact
-Constraint: max compliance
 """
 
-using Ferrite, FerriteGmsh, UnPack
+using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
 using TopOpt
 
@@ -29,9 +12,9 @@ mutable struct MMSOMP{dim,M,N,T<:Real,CT} <: MaterialInterpolation{N,T}
 end
 MMSOMP(mat::Vector{Material{dim,T,CT}}, penal::T) where {dim,T,CT} = MMSOMP{dim,length(mat),length(mat) + 1,T,CT}(mat, penal)
 
-function TopOpt.interpolate(xe::AbstractVector{T}, interp::MMSOMP{dim}) where {T<:Real,dim}
+function TopOpt.interpolate(xe::AbstractVector{T}, interp::MMSOMP{2}) where {T<:Real}
     ρ, θ = xe[1:end-1], xe[end]
-    result = zero(SymmetricTensor{4,dim,T})
+    result = zero(SymmetricTensor{4,2,T})
     for i in eachindex(interp.mat)
         weight = one(T)
         for j in eachindex(interp.mat)
@@ -41,17 +24,15 @@ function TopOpt.interpolate(xe::AbstractVector{T}, interp::MMSOMP{dim}) where {T
                 weight *= one(T) - ρ[j]^interp.penal
             end
         end
-        result += weight * rotate_mmsomp(interp.mat[i], θ)
+        result += weight * rotate(interp.mat[i].C, θ)
     end
-    result += TopOpt.void(Val(dim)).C
+    result += TopOpt.void(Val(2)).C
     return result
 end
-rotate_mmsomp(mat::Material{2}, θ) = rotate(mat.C, θ)
-rotate_mmsomp(mat::Material{3}, θ) = rotate(mat.C, Vec{3}((0.0, 0.0, 1.0)), θ)
 
-function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
+function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
     reset_timer!()
-    !isnothing(filename) && (pvd = paraview_collection(filename))
+    pvd = paraview_collection(filename)
 
     # read mesh
     mesh_file = "examples/models/mbb.msh" # this example contains a rectangular mesh
@@ -87,34 +68,45 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
     f = compute_force_vector(loads, model)
 
     # initialize design variables
-    nmaterials = length(mat_interp.mat)
-    x = DesignVector(nmaterials + 1)
-    foreach(1:getncells(grid)) do _
-        foreach(1:nmaterials) do _
-            push!(x, volfrac, 0, 1)
-        end
-        push!(x, deg2rad(angle), -π, π)
-    end
+    x = collect(Iterators.flatten(zip(
+        fill(volfrac, getncells(grid)),
+        fill(volfrac, getncells(grid)),
+        fill(deg2rad(angle), getncells(grid))
+    )))
+    xmin = collect(Iterators.flatten(zip(
+        fill(0, getncells(grid)),
+        fill(0, getncells(grid)),
+        fill(-π, getncells(grid))
+    )))
+    xmax = collect(Iterators.flatten(zip(
+        fill(1, getncells(grid)),
+        fill(1, getncells(grid)),
+        fill(π, getncells(grid))
+    )))
+
     xTilde = copy(x)
     xPhys = copy(x)
+    dPhysdTilde = similar(x)
+
+    dCO2dx = similar(x)
+    dcdx = similar(x)
+    dvdx = similar(x)
+    dgdx = zeros(2, 3 * getncells(grid))
 
     # initialize linear solver
     fesolver = FESolver(xPhys, model)
 
     @timeit "build filters" begin
-        @info "Building density filter"
+        @info "Building sensitivity filter with radius $rρ"
         density_filter = ConvolutionFilter(rρ, model)
-        @info "Building orientation filter"
+        @info "Building orientation filter with radius $rθ"
         orientation_filter = ConvolutionFilter(rθ, model)
     end
 
     # initial impact
-    CO2_ini = 0
-    for i in 1:nmaterials
-        mati = mat_interp.mat[i]
-        ρi = x[i:nmaterials+1:end]
-        CO2_ini += mati.CO2 * mati.ρ * ρi ⋅ model.elemvol
-    end
+    @views CO2_ini =
+        mat_interp.mat[1].CO2 * mat_interp.mat[1].ρ * xPhys[1:3:end] ⋅ model.elemvol +
+        mat_interp.mat[2].CO2 * mat_interp.mat[2].ρ * xPhys[2:3:end] ⋅ model.elemvol
 
     history = Dict(
         :beta => Float64[],
@@ -139,67 +131,72 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
         for loop in 1:maxiter
             continuation_iter += 1
 
-            # FE analysis
-            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, xPhys)
+            @timeit "filter and project" begin
+                xTilde .= x
+                @views TopOpt.filter!(xTilde[1:3:end], density_filter)
+                @views TopOpt.filter!(xTilde[2:3:end], density_filter)
+                @views TopOpt.filter!(xTilde[3:3:end], orientation_filter)
+
+                xPhys .= xTilde
+                @views project_heaviside!(xPhys[1:3:end], beta, eta)
+                @views project_heaviside!(xPhys[2:3:end], beta, eta)
+            end
+
+            @timeit "assemble stiffness" update_stiffness!(fesolver, xPhys)
             @timeit "linear solve" fea!(fesolver, f)
+
+            @timeit "evaluate functions" begin
+                # Objective: CO2 impact
+                @views CO2 =
+                    mat_interp.mat[1].CO2 * mat_interp.mat[1].ρ * xPhys[1:3:end] ⋅ model.elemvol +
+                    mat_interp.mat[2].CO2 * mat_interp.mat[2].ρ * xPhys[2:3:end] ⋅ model.elemvol
+
+                # Constraint: max compliance
+                u = fesolver.solution
+                c = dot(u, fesolver.K, u)
+
+                # Constraint: max volume fraction
+                @views v = xPhys[1:3:end] ⋅ model.elemvol + xPhys[2:3:end] ⋅ model.elemvol
+
+                # all constraints
+                g = [c / comp_max - 1, v / volfrac / sum(model.elemvol) - 1]
+            end
 
             @timeit "sensitivity analysis" begin
                 # Objective: CO2 impact
-                CO2 = 0
-                dCO2dx = zeros(length(x))
-                for i in 1:nmaterials
-                    mati = mat_interp.mat[i]
-                    @views ρi = xPhys[i:nmaterials+1:end]
-                    CO2 += mati.CO2 * mati.ρ * ρi ⋅ model.elemvol
-                    dCO2dx[i:nmaterials+1:end] .= mati.CO2 * mati.ρ * model.elemvol
-                end
+                dCO2dx[1:3:end] .= mat_interp.mat[1].CO2 * mat_interp.mat[1].ρ * model.elemvol
+                dCO2dx[2:3:end] .= mat_interp.mat[2].CO2 * mat_interp.mat[2].ρ * model.elemvol
+                dCO2dx[3:3:end] .= 0.0
 
                 # Constraint: max compliance
-                @unpack u, K, ∂Ke∂x = fesolver
-                c = dot(u, K, u)
-                dcdx = zeros(length(∂Ke∂x))
-                for cell in CellIterator(model.dh)
-                    @views ue = u[celldofs(cell)]
-                    e = cellid(cell)
-                    nvar = nmaterials + 1
-                    for i in 1:nvar
-                        dcdx[nvar*(e-1)+i] = -dot(ue, ∂Ke∂x[nvar*(e-1)+i], ue)
-                    end
-                end
+                adjoint_sensitivities!(dcdx, u, u, fesolver)
 
                 # Constraint: max volume fraction
-                v = 0
-                dvdx = zeros(length(x))
-                for i in 1:nmaterials
-                    @views v += xPhys[i:nmaterials+1:end] ⋅ model.elemvol
-                    dvdx[i:nmaterials+1:end] .= model.elemvol
-                end
+                dvdx[1:3:end] .= model.elemvol
+                dvdx[2:3:end] .= model.elemvol
+                dvdx[3:3:end] .= 0.0
 
                 # Chain rule
-                dPhysdTilde = copy(xTilde)
+                dPhysdTilde .= xTilde
                 @views project_heaviside_derivative!(dPhysdTilde, beta, eta)
+
                 # densities
-                for i in 1:nmaterials
-                    dCO2dx[i:nmaterials+1:end] .*= dPhysdTilde[i:nmaterials+1:end] # xPhys -> xTilde
-                    @views TopOpt.filter!(dCO2dx[i:nmaterials+1:end], density_filter) # xTilde -> x
+                for i in 1:2
+                    dCO2dx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
+                    @views TopOpt.filter!(dCO2dx[i:3:end], density_filter) # xTilde -> x
 
-                    dcdx[i:nmaterials+1:end] .*= dPhysdTilde[i:nmaterials+1:end] # xPhys -> xTilde
-                    @views TopOpt.filter!(dcdx[i:nmaterials+1:end], density_filter) # xTilde -> x
+                    dcdx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
+                    @views TopOpt.filter!(dcdx[i:3:end], density_filter) # xTilde -> x
 
-                    dvdx[i:nmaterials+1:end] .*= dPhysdTilde[i:nmaterials+1:end] # xPhys -> xTilde
-                    @views TopOpt.filter!(dvdx[i:nmaterials+1:end], density_filter) # xTilde -> x
+                    dvdx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
+                    @views TopOpt.filter!(dvdx[i:3:end], density_filter) # xTilde -> x
                 end
                 # angles, no need to filter dCO2dtheta and dvdtheta, they are all zero
-                @views TopOpt.filter!(dcdx[nmaterials+1:nmaterials+1:end], orientation_filter)
+                @views TopOpt.filter!(dcdx[3:3:end], orientation_filter)
 
-                g = [c / comp_max - 1, v / volfrac / sum(model.elemvol) - 1]
-                dgdx = [dcdx / comp_max;; dvdx / volfrac / sum(model.elemvol)]
-            end
-
-            # volume fractions of each material
-            volfracs = Float64[]
-            for i = 1:nmaterials
-                push!(volfracs, xPhys[i:nmaterials+1:end] ⋅ model.elemvol / sum(model.elemvol))
+                # all constraints
+                dgdx[1, :] .= dcdx / comp_max
+                dgdx[2, :] .= dvdx / volfrac / sum(model.elemvol)
             end
 
             # Stopping criterion: relative change in the objective function
@@ -209,6 +206,11 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
                 Inf
             end
 
+            # log
+            volfracs = [
+                xPhys[1:3:end] ⋅ model.elemvol / sum(model.elemvol),
+                xPhys[2:3:end] ⋅ model.elemvol / sum(model.elemvol),
+            ]
             formatted_volfracs = join([@sprintf("%5.2f", 100 * f) for f in volfracs], ", ")
             @info @sprintf "It = %4d | CO2 = %8.4f | change = %8.2e | c = %9.4f | volfracs = [%s] %%" loop CO2 change c formatted_volfracs
 
@@ -223,11 +225,10 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
             !isnothing(filename) && @timeit "export" begin
                 filename_i = @sprintf "%s.%4.4d.vtu" filename (loop - 1)
                 VTKGridFile(filename_i, grid) do vtk
-                    for i in 1:nmaterials
-                        write_cell_data(vtk, xPhys[i:nmaterials+1:end], "density$(i)")
-                    end
-                    write_cell_data(vtk, xPhys[nmaterials+1:nmaterials+1:end], "theta")
-                    write_solution(vtk, model.dh, fesolver.u)
+                    write_cell_data(vtk, xPhys[1:3:end], "density1")
+                    write_cell_data(vtk, xPhys[2:3:end], "density2")
+                    write_cell_data(vtk, xPhys[3:3:end], "theta")
+                    write_solution(vtk, model.dh, fesolver.solution)
                     pvd[loop] = vtk
                 end
             end
@@ -245,26 +246,13 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename=nothing)
 
             # MMA update
             @timeit "mma update" begin
-                xnew = mma_update!(mma, m, n, continuation_iter,
-                    x, x.lim_inf, x.lim_sup, xold1, xold2,
-                    CO2 / CO2_ini, dCO2dx / CO2_ini, g, dgdx',
+                xnew = mma_update!(mma, continuation_iter,
+                    x, xmin, xmax, xold1, xold2,
+                    CO2 / CO2_ini, dCO2dx / CO2_ini, g, dgdx,
                 )
                 xold2 .= xold1
                 xold1 .= x
                 x .= xnew
-
-                # filtering
-                xTilde .= x
-                for i in 1:nmaterials
-                    @views TopOpt.filter!(xTilde[i:nmaterials+1:end], density_filter)
-                end
-                @views TopOpt.filter!(xTilde[nmaterials+1:nmaterials+1:end], orientation_filter)
-
-                # projection
-                xPhys .= xTilde
-                for i in 1:nmaterials
-                    @views project_heaviside!(xPhys[i:nmaterials+1:end], beta, eta)
-                end
             end
         end
     catch e

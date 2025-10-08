@@ -12,28 +12,28 @@ using Pardiso,
     OhMyThreads,
     UnPack
 
-export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D,
-    NodalLoad, LinearLoad,
-    MaterialInterpolation, FEModel,
-    DesignVector, MMAWorkspace, mma_update!,
-    FESolver, fea!, update_stiffness!, compute_force_vector,
-    ConvolutionFilter, PDEFilter, filter!,
-    project_heaviside!, project_heaviside_derivative!
-
-include("design_variables.jl")
+export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D
+export MaterialInterpolation
+export NodalLoad, LinearLoad
+export FEModel
+export FESolver, fea!, adjoint_sensitivities!, update_stiffness!, compute_force_vector
+export MMAWorkspace, mma_update!
+export ConvolutionFilter, PDEFilter, filter!
+export project_heaviside!, project_heaviside_derivative!
 
 # Finite element analysis
-include("material.jl")
-include("loads.jl")
-include("femodel.jl")
-include("fea.jl")
+include("fea/material.jl")
+include("fea/material_interpolation.jl")
+include("fea/loads.jl")
+include("fea/femodel.jl")
+include("fea/fea.jl")
 
 # MMA
-include("mma.jl")
+include("mma/mma.jl")
 
-# Filtering
-include("filter_convolution.jl")
-include("filter_pde.jl")
-include("projection.jl")
+# Filtering and projection
+include("utils/filter_convolution.jl")
+include("utils/filter_pde.jl")
+include("utils/projection.jl")
 
 end # module TopOpt

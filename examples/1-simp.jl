@@ -1,24 +1,23 @@
 """
-MBB beam optimization using density filter
-
-Follows the structure of
+Basic implementation following the structure of
 E. Andreassen, A. Clausen, M. Schevenels, B. S. Lazarov and O. Sigmund
 Efficient topology optimization in MATLAB using 88 lines of code
 Structural and Multidisciplinary Optimization (2011)
 """
-# INFO: plotting contains some workarounds needed until FerriteViz supports Ferrite v1.0
+# INFO: plotting contains some workarounds because FerriteViz does not support Ferrite v1.0
 
-using Ferrite, FerriteGmsh, UnPack
+using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, GLMakie
 using TopOpt
 
+# defining a power law MaterialInterpolation with 1 design variable per element
 struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
     penal::T
 end
 TopOpt.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
 
-function simp2(volfrac, rρ)
+function simp(volfrac, rρ)
     reset_timer!()
 
     # read mesh
@@ -55,17 +54,17 @@ function simp2(volfrac, rρ)
     nelx, nely = [xmax, ymax] / sqrt(model.elemvol[1]) .|> round .|> Int # assuming identical square elements
 
     # initialize design variables
-    x = DesignVector(1)
-    foreach(1:getncells(model.grid)) do _
-        push!(x, volfrac, 1e-3, 1)
-    end
-    xPhys = copy(x)
+    x = fill(volfrac, getncells(grid))
+    xmin = fill(1e-3, getncells(grid))
+    xmax = fill(1, getncells(grid))
+    dcdx = similar(x)
+    dgdx = zeros(1, getncells(grid))
 
     # initialize FE solver
     fesolver = FESolver(x, model)
 
     @timeit "build filters" begin
-        @info "Building density filter"
+        @info "Building sensitivity filter with radius $rρ"
         density_filter = ConvolutionFilter(rρ, model)
     end
 
@@ -78,54 +77,50 @@ function simp2(volfrac, rρ)
     @info "Starting optimization"
     try
         # plot initial design
-        display(image(reshape(-xPhys.variables, nely, nelx)', interpolate=false, axis=(aspect=DataAspect(), yreversed=true, xreversed=true)))
+        display(image(reshape(-x, nely, nelx)', interpolate=false, axis=(aspect=DataAspect(), yreversed=true, xreversed=true)))
 
         maxiter = 500
-        for loop in 1:maxiter
-            # FE analysis
-            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, xPhys)
+        for loop in 1:maxiter+1
+            @timeit "assemble stiffness" update_stiffness!(fesolver, x)
             @timeit "linear solve" fea!(fesolver, f)
 
-            @timeit "sensitivity analysis" begin
-                # Objective function: compliance
-                @unpack u, K, ∂Ke∂x = fesolver
-                c = dot(u, K, u)
-                dcdx = zeros(length(∂Ke∂x))
-                for cell in CellIterator(model.dh)
-                    @views ue = u[celldofs(cell)]
-                    dcdx[cellid(cell)] = -dot(ue, ∂Ke∂x[cellid(cell)], ue)
-                end
+            @timeit "evaluate functions" begin
+                # Objective: compliance
+                u = fesolver.solution
+                c = dot(u, fesolver.K, u)
 
                 # Constraint: max volume fraction
-                g = [xPhys ⋅ model.elemvol / sum(model.elemvol) / volfrac - 1,]
-                dgdx = model.elemvol / sum(model.elemvol) / volfrac
+                g = [x ⋅ model.elemvol / sum(model.elemvol) / volfrac - 1,]
+            end
 
-                # chain rule
-                TopOpt.filter!(dcdx, density_filter)
-                TopOpt.filter!(dgdx, density_filter)
+            @timeit "sensitivity analysis" begin
+                # Objective: compliance
+                adjoint_sensitivities!(dcdx, u, u, fesolver)
+
+                # Constraint: max volume fraction
+                dgdx .= model.elemvol' / sum(model.elemvol) / volfrac
+
+                # sensitivity filtering
+                TopOpt.filter!(dcdx, x, density_filter)
             end
 
             # log and plot
             change = norm(x - xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | change = %8.2e" (loop - 1) c change
             empty!(current_axis())
-            image!(reshape(-xPhys.variables, nely, nelx)', interpolate=false)
+            image!(reshape(-x, nely, nelx)', interpolate=false)
 
             # Stopping criterion: max change in the design variables
             change < 0.1 && break
 
             # MMA update
             @timeit "mma update" begin
-                xnew = mma_update!(mma, m, n, loop,
-                    x, x.lim_inf, x.lim_sup, xold1, xold2,
-                    c, dcdx, g, dgdx')
+                xnew = mma_update!(mma, loop,
+                    x, xmin, xmax, xold1, xold2,
+                    c, dcdx, g, dgdx)
                 xold2 .= xold1
                 xold1 .= x
                 x .= xnew
-
-                # filtering
-                xPhys .= x
-                TopOpt.filter!(xPhys, density_filter)
             end
         end
     catch e

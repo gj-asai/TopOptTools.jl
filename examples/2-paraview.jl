@@ -1,35 +1,32 @@
 """
-Same as example 3, but also saves result files if argument filename is not nothing
-- filename.jld2: contains the convergence history
+Same as example 1, but saves the results in Paraview files
+- filename.h5: contains the convergence history
 - filename.xxxx.vtu: Paraview file with results after intermediate iteration. Contains design variables, displacements and stresses
 - filename.pvd: Paraview file to view iterations as time steps
 
-Stress calculations are not optimized and are performed (relatively slowly) every iteration
+Stress calculations are not efficient and are performed every iteration
 """
-# INFO: plotting contains hardcoded workarounds needed until FerriteViz supports Ferrite v1.0
-# TODO: plotting is missing the material orientations
 
-using Ferrite, FerriteGmsh, UnPack
-using TimerOutputs, Printf, WriteVTK, HDF5, GLMakie
+using Ferrite, FerriteGmsh
+using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
 using TopOpt
 
-struct SOMP{dim,T<:Real,CT} <: MaterialInterpolation{2,T}
+struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, somp::SOMP) = xe[1]^somp.penal * rotate(somp.mat.C, xe[2])
+TopOpt.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
 
 # Returns stresses at the quadrature points for the result stored in solver
 function stress(solver::FESolver)
-    x = solver.xPhys
-    @unpack cellvalues, mat_interp, grid, dh = solver.model
+    x = solver.x
+    cellvalues = solver.model.cellvalues
+    mat_interp = solver.model.mat_interp
+    grid = solver.model.grid
+    dh = solver.model.dh
     dim = TopOpt.get_dim(solver.model)
 
     qp_global = [
-        [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
-        for _ in 1:getncells(grid)
-    ]
-    qp_material = [
         [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
         for _ in 1:getncells(grid)
     ]
@@ -50,18 +47,16 @@ function stress(solver::FESolver)
         Ferrite.reinit!(cellvalues, cell)
         e = cellid(cell)
         cell_global = qp_global[e]
-        cell_material = qp_material[e]
         cell_vonmises = qp_vonmises[e]
         cell_principal = qp_principal[e]
         cell_directions = qp_directions[e]
         for q_point in 1:getnquadpoints(cellvalues)
-            xe = @views x[2*e-1:2*e]
-            ε = function_symmetric_gradient(cellvalues, q_point, solver.u, celldofs(cell))
+            xe = @views x[e:e]
+            ε = function_symmetric_gradient(cellvalues, q_point, solver.solution, celldofs(cell))
             σ = TopOpt.interpolate(xe, mat_interp) ⊡ ε
             s = dev(σ)
 
             cell_global[q_point] = σ
-            cell_material[q_point] = rotate(σ, -xe[2])
             cell_vonmises[q_point] = sqrt(1.5 * s ⊡ s)
 
             # sort eigenvalues by absolute value, largest first
@@ -72,12 +67,12 @@ function stress(solver::FESolver)
         end
     end
 
-    return qp_global, qp_material, qp_vonmises, qp_principal, qp_directions
+    return qp_global, qp_vonmises, qp_principal, qp_directions
 end
 
-function somp_paraview(volfrac, rρ, rθ, angle=0; filename=nothing)
+function paraview(volfrac, rρ; filename)
     reset_timer!()
-    !isnothing(filename) && (pvd = paraview_collection(filename))
+    pvd = paraview_collection(filename)
 
     # read mesh
     mesh_file = "examples/models/mbb.msh" # this example contains a rectangular mesh
@@ -96,12 +91,12 @@ function somp_paraview(volfrac, rρ, rθ, angle=0; filename=nothing)
         Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
     ]
     loads = [
-        NodalLoad("force", (0.0, -100.0)),
+        NodalLoad("force", (0.0, -1.0)),
     ]
 
     # material
-    mat = Orthotropic2D(El=10.48e3, Et=5.26e3, nult=0.39, Glt=1.89e3) # carbon fiber
-    mat_interp = SOMP(mat, 3.0)
+    mat = Isotropic2D(E=1.0, nu=0.3)
+    mat_interp = SIMP(mat, 3.0)
 
     # element interpolation and quadrature
     ip = Lagrange{RefQuadrilateral,1}() # linear elements
@@ -110,23 +105,20 @@ function somp_paraview(volfrac, rρ, rθ, angle=0; filename=nothing)
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
     f = compute_force_vector(loads, model)
-    nelx, nely = [xmax, ymax] / sqrt(model.elemvol[1]) .|> round .|> Int # assuming identical square elements
 
     # initialize design variables
-    x = DesignVector(2)
-    foreach(1:getncells(grid)) do _
-        push!(x, volfrac, 1e-3, 1)
-        push!(x, deg2rad(angle), -π, π)
-    end
+    x = fill(volfrac, getncells(grid))
+    xmin = fill(1e-3, getncells(grid))
+    xmax = fill(1, getncells(grid))
+    dcdx = similar(x)
+    dgdx = zeros(1, getncells(grid))
 
     # initialize FE solver
     fesolver = FESolver(x, model)
 
     @timeit "build filters" begin
-        @info "Building density filter"
+        @info "Building sensitivity filter with radius $rρ"
         density_filter = ConvolutionFilter(rρ, model)
-        @info "Building orientation filter"
-        orientation_filter = ConvolutionFilter(rθ, model)
     end
 
     history = Dict(
@@ -142,60 +134,51 @@ function somp_paraview(volfrac, rρ, rθ, angle=0; filename=nothing)
 
     @info "Starting optimization"
     try
-        # plot initial design
-        display(image(reshape(-x.variables[1:2:end], nely, nelx)', interpolate=false, axis=(aspect=DataAspect(), yreversed=true, xreversed=true)))
-
         maxiter = 1000
         for loop in 1:maxiter+1
-            # FE analysis
-            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, x)
+            @timeit "assemble stiffness" update_stiffness!(fesolver, x)
             @timeit "linear solve" fea!(fesolver, f)
 
             @timeit "stresses" begin
-                qp_global, qp_material, qp_vonmises, qp_principalstress, qp_principaldir = stress(fesolver)
+                qp_global, qp_vonmises, qp_principalstress, qp_principaldir = stress(fesolver)
                 projector = L2Projector(ip^2, grid)
             end
 
-            @timeit "sensitivity analysis" begin
-                # Objective function: compliance
-                @unpack u, K, ∂Ke∂x = fesolver
-                c = dot(u, K, u)
-                dcdx = zeros(length(∂Ke∂x))
-                for cell in CellIterator(model.dh)
-                    @views ue = u[celldofs(cell)]
-                    e = cellid(cell)
-                    dcdx[2*(e-1)+1] = -dot(ue, ∂Ke∂x[2*(e-1)+1], ue) # dcdrho
-                    dcdx[2*(e-1)+2] = -dot(ue, ∂Ke∂x[2*(e-1)+2], ue) # dcdtheta
-                end
+            @timeit "evaluate functions" begin
+                # Objective: compliance
+                u = fesolver.solution
+                c = dot(u, fesolver.K, u)
 
                 # Constraint: max volume fraction
-                g = [x[1:2:end] ⋅ model.elemvol / sum(model.elemvol) / volfrac - 1,]
-                dgdx = zeros(length(x))
-                dgdx[1:2:end] .= model.elemvol / sum(model.elemvol) / volfrac
-
-                # filtering
-                @views TopOpt.filter!(dcdx[1:2:end], x[1:2:end], density_filter)
+                g = [x ⋅ model.elemvol / sum(model.elemvol) / volfrac - 1,]
             end
 
-            # log and plot
-            change = norm((x-xold1)[1:2:end], Inf)
+            @timeit "sensitivity analysis" begin
+                # Objective: compliance
+                adjoint_sensitivities!(dcdx, u, u, fesolver)
+
+                # Constraint: max volume fraction
+                dgdx .= model.elemvol' / sum(model.elemvol) / volfrac
+
+                # sensitivity filtering
+                TopOpt.filter!(dcdx, x, density_filter)
+            end
+
+            # log
+            change = norm(x - xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | change = %5.3f" (loop - 1) c change
-            empty!(current_axis())
-            @views image!(reshape(-x.variables[1:2:end], nely, nelx)', interpolate=false)
 
             # Update history
             push!(history[:objective], c)
             push!(history[:constraint], g)
 
             # Save iteration
-            !isnothing(filename) && @timeit "export" begin
+            @timeit "export" begin
                 filename_i = @sprintf "%s.%4.4d.vtu" filename (loop - 1)
                 VTKGridFile(filename_i, grid) do vtk
-                    @views write_cell_data(vtk, x[1:2:end], "density")
-                    @views write_cell_data(vtk, x[2:2:end], "theta")
-                    write_solution(vtk, model.dh, fesolver.u)
+                    @views write_cell_data(vtk, x, "density")
+                    write_solution(vtk, model.dh, fesolver.solution)
                     write_projection(vtk, projector, project(projector, qp_global, qr), "stress - global")
-                    write_projection(vtk, projector, project(projector, qp_material, qr), "stress - material")
                     write_projection(vtk, projector, project(projector, qp_vonmises, qr), "stress - von mises")
                     write_projection(vtk, projector, project(projector, qp_principalstress, qr), "stress - principal")
 
@@ -208,33 +191,33 @@ function somp_paraview(volfrac, rρ, rθ, angle=0; filename=nothing)
             end
 
             # Stopping criterion: max change in the design variables
-            change < 0.05 && break
+            change < 0.1 && break
 
             # MMA update
             @timeit "mma update" begin
-                xnew = mma_update!(mma, m, n, loop,
-                    x, x.lim_inf, x.lim_sup, xold1, xold2,
-                    c, dcdx, g, dgdx')
+                xnew = mma_update!(mma, loop,
+                    x, xmin, xmax, xold1, xold2,
+                    c, dcdx, g, dgdx)
                 xold2 .= xold1
                 xold1 .= x
                 x .= xnew
-
-                # filtering
-                @views TopOpt.filter!(x[2:2:end], orientation_filter)
             end
-
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"
         # rethrow()
     finally
-        !isnothing(filename) && @timeit "export" begin
+        @timeit "export" begin
             # history
             h5open(filename * ".h5", "w") do file
                 write(file, "objective", history[:objective])
                 write(file, "constraint", reduce(hcat, history[:constraint]))
             end
             @info "Saved file $(filename).h5"
+
+            # final design
+            save("$(filename).design.jld2", "x", x)
+            @info "Saved file $(filename).design.jld2"
 
             # paraview .pvd
             vtk_save(pvd)

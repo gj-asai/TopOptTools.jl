@@ -1,23 +1,23 @@
 """
-Same as example 1, but for the GE bracket in three dimensions
 """
 
-using Ferrite, FerriteGmsh, UnPack
+using Ferrite, Tensors, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
 using TopOpt
 
-struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
+struct SOMP{dim,T<:Real,CT,V<:Vec} <: MaterialInterpolation{2,T}
     mat::Material{dim,T,CT}
+    printing_direction::V
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
+TopOpt.interpolate(xe::AbstractVector, somp::SOMP) = xe[1]^somp.penal * rotate(somp.mat.C, somp.printing_direction, xe[2])
 
-function bracket(volfrac, rρ; filename=nothing)
+function bracket(volfrac, rρ, rθ, angle=0; filename)
     reset_timer!()
-    !isnothing(filename) && (pvd = paraview_collection(filename))
+    pvd = paraview_collection(filename)
 
     # read mesh
-    mesh_file = "examples/models/bracket.msh" # this example contains a rectangular mesh
+    mesh_file = "examples/models/bracket_coarse.msh"
     grid = redirect_stdout(() -> togrid(mesh_file), devnull) # suppress print from the Gmsh.jl call inside togrid
     @info "Done reading $(mesh_file): $(getnnodes(grid)) nodes, $(getncells(grid)) elements"
 
@@ -25,13 +25,16 @@ function bracket(volfrac, rρ; filename=nothing)
     constraints = [
         Dirichlet(:u, getfacetset(grid, "fixed"), (x, t) -> [0.0, 0.0, 0.0]),
     ]
-    loads = [
+    loads1 = [
+        LinearLoad("force", (0.0, -1.0, 0.0)),
+    ]
+    loads2 = [
         LinearLoad("force", (0.0, 0.0, 1.0)),
     ]
 
     # material
-    mat = Isotropic3D(E=1e3, nu=0.3)
-    mat_interp = SIMP(mat, 3.0)
+    bamboo = Orthotropic3D(El=10.8e3, Et=4.6e3, nult=0.36, Glt=1.7e3, ρ=1.12e-3, CO2=2.9)
+    mat_interp = SOMP(bamboo, Vec{3}((0.0, 0.0, 1.0)), 3.0)
 
     # element interpolation and quadrature
     ip = Lagrange{RefTetrahedron,1}() # linear elements
@@ -39,20 +42,44 @@ function bracket(volfrac, rρ; filename=nothing)
 
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
-    f = compute_force_vector(loads, model)
+    f1 = compute_force_vector(loads1, model)
 
     # initialize design variables
-    x = DesignVector(1)
-    foreach(1:getncells(model.grid)) do _
-        push!(x, volfrac, 1e-3, 1)
+    x = collect(Iterators.flatten(zip(
+        fill(volfrac, getncells(grid)),
+        fill(deg2rad(angle), getncells(grid))
+    )))
+    xmin = collect(Iterators.flatten(zip(
+        fill(1e-3, getncells(grid)),
+        fill(-π, getncells(grid))
+    )))
+    xmax = collect(Iterators.flatten(zip(
+        fill(1, getncells(grid)),
+        fill(π, getncells(grid))
+    )))
+    dcdx = similar(x)
+    dgdx = zeros(1, 2 * getncells(grid))
+
+    # passive regions
+    for i in 1:getncells(grid)
+        if sum((model.centers[1:2, i] - [0, 0]) .^ 2) < 10^2 ||
+           sum((model.centers[1:2, i] - [0, -38]) .^ 2) < 10^2 ||
+           sum((model.centers[1:2, i] - [-148, 18.5]) .^ 2) < 10^2 ||
+           sum((model.centers[1:2, i] - [-148, -33.6]) .^ 2) < 10^2 ||
+           sum((model.centers[2:3, i] - [-56.8, 44.7]) .^ 2) < 17.8^2
+            x[2i-1] = 1
+            xmin[2i-1] = 0.99
+        end
     end
 
     # initialize FE solver
     fesolver = FESolver(x, model)
 
     @timeit "build filters" begin
-        @info "Building sensitivity filter"
+        @info "Building sensitivity filter with radius $rρ"
         density_filter = ConvolutionFilter(rρ, model)
+        @info "Building orientation filter with radius $rθ"
+        orientation_filter = ConvolutionFilter(rθ, model)
     end
 
     history = Dict(
@@ -68,31 +95,36 @@ function bracket(volfrac, rρ; filename=nothing)
 
     @info "Starting optimization"
     try
-        maxiter = 100
+        maxiter = 50
         for loop in 1:maxiter+1
-            # FE analysis
-            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, x)
-            @timeit "linear solve" fea!(fesolver, f)
-
-            @timeit "sensitivity analysis" begin
-                # Objective function: compliance
-                @unpack u, K, ∂Ke∂x = fesolver
-                c = dot(u, K, u)
-                dcdx = zeros(length(∂Ke∂x))
-                for cell in CellIterator(model.dh)
-                    @views ue = u[celldofs(cell)]
-                    dcdx[cellid(cell)] = -dot(ue, ∂Ke∂x[cellid(cell)], ue)
-                end
-
-                # Constraint: max volume fraction
-                g = [x ⋅ model.elemvol / sum(model.elemvol) / volfrac - 1,]
-                dgdx = model.elemvol' / sum(model.elemvol) / volfrac
-
-                # filtering
-                TopOpt.filter!(dcdx, x, density_filter)
+            @timeit "filtering" begin
+                @views TopOpt.filter!(x[2:2:end], orientation_filter)
             end
 
-            # log and plot
+            @timeit "assemble stiffness" update_stiffness!(fesolver, x)
+            @timeit "linear solve" fea!(fesolver, f1)
+
+            @timeit "evaluate functions" begin
+                # Objective: compliance
+                u = fesolver.solution
+                c = dot(u, fesolver.K, u)
+
+                # Constraint: max volume fraction
+                @views g = [x[1:2:end] ⋅ model.elemvol / sum(model.elemvol) / volfrac - 1,]
+            end
+
+            @timeit "sensitivity analysis" begin
+                # Objective: compliance
+                adjoint_sensitivities!(dcdx, u, u, fesolver)
+
+                # Constraint: max volume fraction
+                dgdx[1, 1:2:end] .= model.elemvol / sum(model.elemvol) / volfrac
+                dgdx[1, 2:2:end] .= 0.0
+
+                # filtering
+                @views TopOpt.filter!(dcdx[1:2:end], x[1:2:end], density_filter)
+            end
+
             change = norm(x - xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | change = %8.2e" (loop - 1) c change
 
@@ -104,8 +136,9 @@ function bracket(volfrac, rρ; filename=nothing)
             !isnothing(filename) && @timeit "export" begin
                 filename_i = @sprintf "%s.%4.4d.vtu" filename (loop - 1)
                 VTKGridFile(filename_i, grid) do vtk
-                    write_cell_data(vtk, x, "density")
-                    write_solution(vtk, model.dh, fesolver.u)
+                    write_cell_data(vtk, x[1:2:end], "density")
+                    write_cell_data(vtk, x[2:2:end], "theta")
+                    write_solution(vtk, model.dh, fesolver.solution)
                     pvd[loop] = vtk
                 end
             end
@@ -115,8 +148,8 @@ function bracket(volfrac, rρ; filename=nothing)
 
             # MMA update
             @timeit "mma update" begin
-                xnew = mma_update!(mma, m, n, loop,
-                    x, x.lim_inf, x.lim_sup, xold1, xold2,
+                xnew = mma_update!(mma, loop,
+                    x, xmin, xmax, xold1, xold2,
                     c, dcdx, g, dgdx)
                 xold2 .= xold1
                 xold1 .= x
@@ -127,7 +160,7 @@ function bracket(volfrac, rρ; filename=nothing)
         @warn "Computation interrupted - $(typeof(e))"
         # rethrow()
     finally
-        !isnothing(filename) && @timeit "export" begin
+        @timeit "export" begin
             # history
             h5open(filename * ".h5", "w") do file
                 write(file, "objective", history[:objective])

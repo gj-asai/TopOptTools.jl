@@ -11,6 +11,8 @@ struct MMAWorkspace
     a::Vector{Float64}
     c::Vector{Float64}
     d::Vector{Float64}
+    m::Int
+    n::Int
 
     low::Vector{Float64}
     upp::Vector{Float64}
@@ -33,22 +35,23 @@ Prepares an optimization with `m` constraints and `n` design variables.
 """
 function MMAWorkspace(m::Int, n::Int, a0, a, c, d; asyinit=0.5, asyincr=1.2, asydecr=0.7, move=0.5)
     MMAWorkspace(
-        asyinit, asyincr, asydecr, move, a0, a, c, d,
+        asyinit, asyincr, asydecr, move, a0, a, c, d, m, n,
         Vector{Float64}(undef, n), Vector{Float64}(undef, n), Vector{Float64}(undef, n), Vector{Float64}(undef, n),
         Vector{Float64}(undef, n), Vector{Float64}(undef, n),
         Matrix{Float64}(undef, m, n), Matrix{Float64}(undef, m, n), Vector{Float64}(undef, m),
     )
 end
 
+# TODO: change this signature
 """
-    mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx)
+    mma_update!(workspace, iter, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx)
 
 Returns the updated value of the design variables
 
 The subproblem is solved using a dual method
 """
-function mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx)
-    @unpack a0, a, c, d, asyinit, asyincr, asydecr, move = workspace
+function mma_update!(workspace, iter, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx)
+    @unpack a0, a, c, d, asyinit, asyincr, asydecr, move, m, n = workspace
     @unpack low, upp, alfa, beta = workspace
     @unpack p0, q0, p, q, r = workspace
 
@@ -99,7 +102,6 @@ function mma_update!(workspace, m, n, iter, xval, xmin, xmax, xold1, xold2, f0va
         end
     end
 
-    # TODO: this can still be improved with some caching
     function primal(lambda)
         plam = sqrt.(p0 + p' * lambda)
         qlam = sqrt.(q0 + q' * lambda)

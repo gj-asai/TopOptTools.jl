@@ -5,8 +5,8 @@ A MATLAB code for topology optimization using the geometry projection method
 Structural and Multidisciplinary Optimization, 2020
 """
 
-using Ferrite, FerriteGmsh, UnPack, LinearAlgebra
-using TimerOutputs, Printf, WriteVTK, HDF5
+using Ferrite, FerriteGmsh, LinearAlgebra
+using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
 using TopOpt
 
 struct Linear{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
@@ -14,9 +14,9 @@ struct Linear{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
 end
 TopOpt.interpolate(xe::AbstractVector, linear::Linear) = xe[1] * linear.mat.C
 
-function geometry_projection(volfrac; filename=nothing)
+function geometry_projection(volfrac; filename)
     reset_timer!()
-    !isnothing(filename) && (pvd = paraview_collection(filename))
+    pvd = paraview_collection(filename)
 
     # read mesh
     mesh_file = "examples/models/mbb_gp.msh" # this example contains a rectangular mesh
@@ -62,14 +62,12 @@ function geometry_projection(volfrac; filename=nothing)
     ]
 
     # initialize design variables
-    z = DesignVector(6) # design variables: x1, y1, x2, y2, r, alpha
+    z, zmin, zmax = Float64[], Float64[], Float64[]
     for (x1, y1, x2, y2) in zip(points[1:2:end, 1], points[1:2:end, 2], points[2:2:end, 1], points[2:2:end, 2])
-        push!(z, x1 / xmax, 0, 1)
-        push!(z, y1 / ymax, 0, 1)
-        push!(z, x2 / xmax, 0, 1)
-        push!(z, y2 / ymax, 0, 1)
-        push!(z, 0.25, 0.2499, 0.2501)
-        push!(z, 0.5, 0, 1)
+        # design variables: x1, y1, x2, y2, r, alpha
+        append!(z, [x1 / xmax, y1 / ymax, x2 / xmax, y2 / ymax, 0.25, 0.5])
+        append!(zmin, [0, 0, 0, 0, 0.2499, 0])
+        append!(zmax, [1, 1, 1, 1, 0.2501, 1])
     end
 
     # preallocate densities
@@ -77,6 +75,9 @@ function geometry_projection(volfrac; filename=nothing)
     num_elem = getncells(model.grid)
     dens_c = zeros(num_elem) # densities for compliance computation
     dens_v = zeros(num_elem) # densities for volume computation
+
+    dcddensc = zeros(length(dens_c))
+    dvddensv = zeros(length(dens_v))
     ddenscdz = zeros(length(dens_c), length(z))
     ddensvdz = zeros(length(dens_v), length(z))
 
@@ -164,7 +165,7 @@ function geometry_projection(volfrac; filename=nothing)
 
                         # density in element e due to bar b
                         xbe = ϕbe / r
-                        ∂ρbe∂z = zeros(z.vars_per_element)
+                        ∂ρbe∂z = zeros(6)
                         if xbe < -1
                             ρbe = 0
                         elseif xbe > 1
@@ -204,28 +205,29 @@ function geometry_projection(volfrac; filename=nothing)
                 end
             end
 
-            # FE analysis
             @timeit "assemble stiffness matrix" update_stiffness!(fesolver, dens_c)
             @timeit "linear solve" fea!(fesolver, f)
 
-            @timeit "sensitivity analysis" begin
+            @timeit "evaluate functions" begin
                 # Objective: compliance
-                @unpack u, K, ∂Ke∂x = fesolver
-                c = dot(u, K, u)
-                dcddensc = zeros(length(∂Ke∂x))
-                for cell in CellIterator(model.dh)
-                    @views ue = u[celldofs(cell)]
-                    dcddensc[cellid(cell)] = -ue' * ∂Ke∂x[cellid(cell)] * ue
-                end
+                u = fesolver.solution
+                c = dot(u, fesolver.K, u)
 
                 # Constraint: max volume fraction
                 v = dens_v ⋅ model.elemvol
-                dvddensv = copy(model.elemvol)
                 g = [v / sum(model.elemvol) / volfrac - 1,]
+            end
+
+            @timeit "sensitivity analysis" begin
+                # Objective: compliance
+                adjoint_sensitivities!(dcddensc, u, u, fesolver)
+                dcdz = vec(dcddensc' * ddenscdz)
+
+                # Constraint: max volume fraction
+                dvddensv .= model.elemvol
                 dgddensv = dvddensv / sum(model.elemvol) / volfrac
 
                 # Chain rule
-                dcdz = vec(dcddensc' * ddenscdz)
                 dgdz = vec(dgddensv' * ddensvdz)
             end
 
@@ -241,7 +243,7 @@ function geometry_projection(volfrac; filename=nothing)
                 filename_i = @sprintf "%s.%4.4d.vtu" filename loop
                 VTKGridFile(filename_i, grid) do vtk
                     write_cell_data(vtk, dens_c, "density")
-                    write_solution(vtk, model.dh, fesolver.u)
+                    write_solution(vtk, model.dh, fesolver.solution)
                     pvd[loop] = vtk
                 end
             end
@@ -250,8 +252,8 @@ function geometry_projection(volfrac; filename=nothing)
 
             # MMA update
             @timeit "mma update" begin
-                znew = mma_update!(mma, m, n, loop,
-                    z, z.lim_inf, z.lim_sup, zold1, zold2,
+                znew = mma_update!(mma, loop,
+                    z, zmin, zmax, zold1, zold2,
                     c, dcdz, g, dgdz'
                 )
                 zold2 .= zold1

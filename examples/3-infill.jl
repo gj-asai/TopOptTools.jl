@@ -1,16 +1,13 @@
 """
-Infill optimization
-
 Implementation of
 J. Wu, N. Aage, R. Westermann and O. Sigmund
 Infill Optimization for Additive Manufacturing - Approaching Bone-like Porous Structures
 IEEE Trans. on Visualization and Computer Graphics (2017)
 """
-# WARNING: assumes that all elements are 1x1
-# INFO: plotting contains some workarounds needed until FerriteViz supports Ferrite v1.0
+# INFO: assumes that all elements are 1x1
 
-using Ferrite, FerriteGmsh, UnPack
-using TimerOutputs, Printf, GLMakie
+using Ferrite, FerriteGmsh
+using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
 using TopOpt
 
 # mutable SIMP, accepts continuation on the penalization
@@ -20,8 +17,9 @@ mutable struct mSIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
 end
 TopOpt.interpolate(xe::AbstractVector, simp::mSIMP) = TopOpt.void(Val(2)).C + xe[1]^simp.penal * simp.mat.C
 
-function infill(vol_local, rρ, rlocal)
+function infill(vol_local, rρ, rlocal; filename)
     reset_timer!()
+    pvd = paraview_collection(filename)
 
     # read mesh
     mesh_file = "examples/models/mbb_infill.msh" # this example contains a rectangular mesh
@@ -54,13 +52,14 @@ function infill(vol_local, rρ, rlocal)
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
     f = compute_force_vector(loads, model)
-    nelx, nely = [xmax, ymax] / sqrt(model.elemvol[1]) .|> round .|> Int # assuming identical square elements
 
     # initialize design variables
-    x = DesignVector(1)
-    foreach(1:getncells(model.grid)) do _
-        push!(x, vol_local, 1e-3, 1)
-    end
+    x = fill(vol_local, getncells(grid))
+    xmin = fill(1e-3, getncells(grid))
+    xmax = fill(1, getncells(grid))
+    dcdx = similar(x)
+    dgdx = similar(x)
+
     xTilde = copy(x)
     xPhys = copy(x)
     x_pde_hat = copy(x)
@@ -69,11 +68,18 @@ function infill(vol_local, rρ, rlocal)
     fesolver = FESolver(xPhys, model)
 
     @timeit "build filters" begin
-        @info "Building density filter"
+        @info "Building density filter with radius $rρ"
         density_filter = ConvolutionFilter(rρ, model)
-        @info "Build local volume filter"
+        @info "Build local volume filter with radius $rlocal"
         local_filter = PDEFilter(rlocal, model)
     end
+
+    history = Dict(
+        :objective => Float64[],
+        :constraint => Vector{Float64}[],
+        :beta => Float64[],
+        :penal => Float64[],
+    )
 
     # initialize MMA
     m, n = 1, length(x)
@@ -84,38 +90,44 @@ function infill(vol_local, rρ, rlocal)
     beta = 1.0
     eta = 0.5
     plocal = 16
-    vol_max_pnorm = (nelx * nely * vol_local^plocal)^(1 / plocal)
+    vol_max_pnorm = (getncells(grid) * vol_local^plocal)^(1 / plocal)
 
     @info "Starting optimization with beta = $beta, penal = $(mat_interp.penal)"
     try
-        # plot initial design
-        display(image(reshape(-xPhys.variables, nely, nelx)', interpolate=false, axis=(aspect=DataAspect(), yreversed=true, xreversed=true)))
-
         maxiter = 600
         loopbeta = 0
         for loop in 1:maxiter+1
             loopbeta += 1
 
-            # FE analysis
-            @timeit "assemble stiffness matrix" update_stiffness!(fesolver, xPhys)
+            @timeit "filter and project" begin
+                xTilde .= x
+                TopOpt.filter!(xTilde, density_filter)
+
+                xPhys .= xTilde
+                project_heaviside!(xPhys, beta, eta)
+            end
+
+            @timeit "assemble stiffness" update_stiffness!(fesolver, xPhys)
             @timeit "linear solve" fea!(fesolver, f)
 
-            @timeit "sensitivity analysis" begin
-                # Objective function: compliance
-                @unpack u, K, ∂Ke∂x = fesolver
-                c = dot(u, K, u)
-                dcdx = zeros(length(∂Ke∂x))
-                for cell in CellIterator(model.dh)
-                    @views ue = u[celldofs(cell)]
-                    dcdx[cellid(cell)] = -dot(ue, ∂Ke∂x[cellid(cell)], ue)
-                end
+            @timeit "evaluate functions" begin
+                # Objective: compliance
+                u = fesolver.solution
+                c = dot(u, fesolver.K, u)
 
                 # Constraint: max local volume
                 x_pde_hat .= xPhys
                 TopOpt.filter!(x_pde_hat, local_filter)
                 norm_xlocal = norm(x_pde_hat, plocal)
                 g = [norm_xlocal - vol_max_pnorm,]
-                dgdx = (x_pde_hat / norm_xlocal) .^ (plocal - 1)
+            end
+
+            @timeit "sensitivity analysis" begin
+                # Objective: compliance
+                adjoint_sensitivities!(dcdx, u, u, fesolver)
+
+                # Constraint: max local volume
+                dgdx .= (x_pde_hat / norm_xlocal) .^ (plocal - 1)
 
                 # chain rule
                 dx = copy(xTilde)
@@ -129,11 +141,25 @@ function infill(vol_local, rρ, rlocal)
                 TopOpt.filter!(dgdx, density_filter)
             end
 
-            # log and plot
+            # log
             change = norm(x - xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | vol = %5.3f | cons = %8.4f" (loop - 1) c sum(xPhys) / sum(model.elemvol) g[1]
-            empty!(current_axis())
-            image!(reshape(-xPhys.variables, nely, nelx)', interpolate=false)
+
+            # Update history
+            push!(history[:objective], c)
+            push!(history[:constraint], g)
+            push!(history[:beta], beta)
+            push!(history[:penal], mat_interp.penal)
+
+            # Save iteration
+            @timeit "export" begin
+                filename_i = @sprintf "%s.%4.4d.vtu" filename (loop - 1)
+                VTKGridFile(filename_i, grid) do vtk
+                    @views write_cell_data(vtk, x, "density")
+                    write_solution(vtk, model.dh, fesolver.solution)
+                    pvd[loop] = vtk
+                end
+            end
 
             # Continuation on beta and penal
             if beta < 100 && (loopbeta >= 40 || change < 1e-3)
@@ -145,25 +171,35 @@ function infill(vol_local, rρ, rlocal)
 
             # MMA update
             @timeit "mma update" begin
-                xnew = mma_update!(mma, m, n, loopbeta,
-                    x, x.lim_inf, x.lim_sup, xold1, xold2,
+                xnew = mma_update!(mma, loopbeta,
+                    x, xmin, xmax, xold1, xold2,
                     c, dcdx, g, dgdx')
                 xold2 .= xold1
                 xold1 .= x
                 x .= xnew
-
-                # filtering
-                xTilde .= x
-                TopOpt.filter!(xTilde, density_filter)
-
-                xPhys .= xTilde
-                project_heaviside!(xPhys, beta, eta)
             end
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"
         # rethrow()
     finally
+        @timeit "export" begin
+            # history
+            h5open(filename * ".h5", "w") do file
+                write(file, "objective", history[:objective])
+                write(file, "constraint", reduce(hcat, history[:constraint]))
+            end
+            @info "Saved file $(filename).h5"
+
+            # final design
+            save("$(filename).design.jld2", "x", x)
+            @info "Saved file $(filename).design.jld2"
+
+            # paraview .pvd
+            vtk_save(pvd)
+            @info "Saved file $(filename).pvd"
+        end
+
         print_timer()
     end
 end
