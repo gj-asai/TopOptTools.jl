@@ -63,9 +63,10 @@ function FESolver(x0::AbstractVector, model::FEModel)
 end
 
 """
-    fea!(solver::FESolver[, x::AbstractVector])
+    fea!(solver::FESolver, f::AbstractVector)
 
-Solves the finite element problem with variables `x` and overwrites the results to the memory preallocated in `solver`
+Solves the finite element problem with the stiffness matrix stored in `solver` and right hand side `f`.
+Stores the result in `solver.solution`
 """
 function fea!(solver::FESolver, f::AbstractVector)
     @unpack K, solution, ps = solver
@@ -78,9 +79,17 @@ function fea!(solver::FESolver, f::AbstractVector)
     set_phase!(ps, Pardiso.NUM_FACT_SOLVE_REFINE)
 end
 
-# TODO: write docstring
-function adjoint_sensitivities!(dfdx, lambda, displacements, solver)
-    @unpack ∂Ke∂x, model = solver
+"""
+    adjoint_sensitivities!(dfdx, lambda, displacements, solver::FESolver)
+
+Uses the adjoint system to compute the sensitivities ∂f/∂x of a function f(u).
+
+`lambda` is the vector of adjoint variables, obtained from calling `fea!` with right hand side df/du.
+`displacements` is the vector of nodal displacements, obtained from calling `fea!` with right hand side equal to the forces vector
+"""
+function adjoint_sensitivities!(dfdx, lambda, displacements, solver::FESolver)
+    model = solver.model
+    ∂Ke∂x = solver.∂Ke∂x
     for cell in CellIterator(model.dh)
         e = cellid(cell)
         dofs = celldofs(cell)
@@ -93,11 +102,17 @@ function adjoint_sensitivities!(dfdx, lambda, displacements, solver)
     end
 end
 
-# TODO: write docstring
+"""
+    update_stiffness!(solver::FESolver, x::AbstractVector)
+
+Recomputes the stiffness matrix, using the new design variables `x`.
+
+This function must always be called before using `fea!` and `adjoint_sensitivities!`, otherwise the system will be solved using the wrong stiffness matrix
+"""
 function update_stiffness!(solver::FESolver, x::AbstractVector)
     solver.x .= x
 
-    @unpack x, K, ∂Ke∂x, chnl, ps = solver
+    @unpack x, K, ∂Ke∂x, chnl = solver
     model = solver.model
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
@@ -152,7 +167,11 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
     end
 end
 
-# TODO: write docstring
+"""
+    compute_force_vector(loads::Vector{<:Load}, model::FEModel)
+
+Returns the nodal forces vector corresponding to the load case `loads`, with the Dirichlet boundary conditions in `model` already applied
+"""
 function compute_force_vector(loads::Vector{<:Load}, model::FEModel{dim}) where {dim}
     f = zeros(ndofs(model.dh))
     fe = zeros(getnbasefunctions(model.facetvalues))
