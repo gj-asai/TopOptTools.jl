@@ -55,7 +55,7 @@ function infill(vol_local, rρ, rlocal; filename)
 
     # initialize design variables
     x = fill(vol_local, getncells(grid))
-    xmin = fill(1e-3, getncells(grid))
+    xmin = fill(0, getncells(grid))
     xmax = fill(1, getncells(grid))
     dcdx = similar(x)
     dgdx = similar(x)
@@ -155,7 +155,7 @@ function infill(vol_local, rρ, rlocal; filename)
             @timeit "export" begin
                 filename_i = @sprintf "%s.%4.4d.vtu" filename (loop - 1)
                 VTKGridFile(filename_i, grid) do vtk
-                    @views write_cell_data(vtk, x, "density")
+                    @views write_cell_data(vtk, xPhys, "density")
                     write_solution(vtk, model.dh, fesolver.solution)
                     pvd[loop] = vtk
                 end
@@ -181,7 +181,7 @@ function infill(vol_local, rρ, rlocal; filename)
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"
-        # rethrow()
+        rethrow()
     finally
         @timeit "export" begin
             # history

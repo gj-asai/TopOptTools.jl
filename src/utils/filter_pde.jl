@@ -9,11 +9,11 @@ end
 
 Creates an isotropic Helmholtz PDE filter of radius `radius` for the mesh stored in `model`
 """
-function PDEFilter(radius, model::FEModel)
+function PDEFilter(radius, model::FEModel{dim}) where {dim}
     @unpack ip, qr, grid = model
 
     r_filter = radius / (2 * sqrt(3))
-    Kd = r_filter^2 * one(Tensor{2,2}) # isotropic filter
+    Kd = r_filter^2 * one(Tensor{2,dim}) # isotropic filter
 
     cellvalues = CellValues(qr, ip)
     dh = DofHandler(grid)
@@ -35,7 +35,7 @@ function PDEFilter(radius, model::FEModel)
             for i in 1:n_basefuncs
                 Ni = shape_value(cellvalues, q_point, i)
                 ∇Ni = shape_gradient(cellvalues, q_point, i)
-                T[celldofs(cell)[i], cellid(cell)] += Ni * dΩ
+                T[celldofs(cell)[i], cellid(cell)] += Ni * dΩ / model.elemvol[cellid(cell)]
                 for j in 1:i
                     Nj = shape_value(cellvalues, q_point, j)
                     ∇Nj = shape_gradient(cellvalues, q_point, j)
@@ -57,10 +57,7 @@ function PDEFilter(radius, model::FEModel)
     set_iparm!(ps, 1, 1) # to be able to manually set iparm
     set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
 
-    f = PDEFilter(Kf, T, ps)
-    finalizer(f) do x
-        set_phase!(x.ps, Pardiso.RELEASE_ALL)
-    end
+    return PDEFilter(Kf, T, ps)
 end
 
 """
@@ -74,7 +71,7 @@ function filter!(x::AbstractVector, f::PDEFilter)
     x .= f.T' * x_filt
 
     # Kf doesnt change, so next solves can reuse the factorization
-    set_phase!(f.ps, Pardiso.SOLVE_ITERATIVE_REFINE)
+    set_phase!(f.ps, Pardiso.NUM_FACT_SOLVE_REFINE)
 end
 
 """
