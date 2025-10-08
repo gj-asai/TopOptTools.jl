@@ -1,23 +1,28 @@
 """
+Implementation of
+G. Asai, C. Jansari, F. Lachaud, K. Masania and J. Morlier
+Ecodesign of 3D volumetric fiber-composite structures with topology optimization
+Composites: Part A (2025)
 """
+# TODO: printability is not implemented
 
 using Ferrite, Tensors, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
 using TopOpt
 
-struct SOMP{dim,T<:Real,CT,V<:Vec} <: MaterialInterpolation{2,T}
+mutable struct mSOMP{dim,T<:Real,CT,V<:Vec} <: MaterialInterpolation{2,T}
     mat::Material{dim,T,CT}
     printing_direction::V
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, somp::SOMP) = xe[1]^somp.penal * rotate(somp.mat.C, somp.printing_direction, xe[2])
+TopOpt.interpolate(xe::AbstractVector, somp::mSOMP) = xe[1]^somp.penal * rotate(somp.mat.C, somp.printing_direction, xe[2])
 
 function bracket(volfrac, rρ, rθ, angle=0; filename)
     reset_timer!()
     pvd = paraview_collection(filename)
 
     # read mesh
-    mesh_file = "examples/models/bracket_coarse.msh"
+    mesh_file = "examples/models/bracket.msh"
     grid = redirect_stdout(() -> togrid(mesh_file), devnull) # suppress print from the Gmsh.jl call inside togrid
     @info "Done reading $(mesh_file): $(getnnodes(grid)) nodes, $(getncells(grid)) elements"
 
@@ -26,15 +31,15 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
         Dirichlet(:u, getfacetset(grid, "fixed"), (x, t) -> [0.0, 0.0, 0.0]),
     ]
     loads1 = [
-        LinearLoad("force", (0.0, -1.0, 0.0)),
+        LinearLoad("force", (0.0, 0.0, 0.39)), # vertical, 355.86 N
     ]
     loads2 = [
-        LinearLoad("force", (0.0, 0.0, 1.0)),
+        LinearLoad("force", (0.0, -0.414, 0.0)), # horizontal, 378.10 N
     ]
 
     # material
-    bamboo = Orthotropic3D(El=10.8e3, Et=4.6e3, nult=0.36, Glt=1.7e3, ρ=1.12e-3, CO2=2.9)
-    mat_interp = SOMP(bamboo, Vec{3}((0.0, 0.0, 1.0)), 3.0)
+    flax_pla = Orthotropic3D(El=28.475e3, Et=6.48e3, nult=0.3725, Glt=1.17e3, ρ=1.38e-3, CO2=1.36)
+    mat_interp = mSOMP(flax_pla, Vec{3}((0.0, 0.0, 1.0)), 1.0)
 
     # element interpolation and quadrature
     ip = Lagrange{RefTetrahedron,1}() # linear elements
@@ -43,6 +48,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
     f1 = compute_force_vector(loads1, model)
+    f2 = compute_force_vector(loads2, model)
 
     # initialize design variables
     x = collect(Iterators.flatten(zip(
@@ -57,7 +63,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
         fill(1, getncells(grid)),
         fill(π, getncells(grid))
     )))
-    dcdx = similar(x)
+    dcdx, dc1dx, dc2dx = similar(x), similar(x), similar(x)
     dgdx = zeros(1, 2 * getncells(grid))
 
     # passive regions
@@ -85,6 +91,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
     history = Dict(
         :objective => Float64[],
         :constraint => Vector{Float64}[],
+        :compliances => Vector{Float64}[],
     )
 
     # initialize MMA
@@ -93,44 +100,60 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
     xold1, xold2 = similar(x), similar(x)
     mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma)
 
-    @info "Starting optimization"
+    @info "Starting optimization with p = $(mat_interp.penal)"
     try
-        maxiter = 50
+        maxiter = 100
+        max_grey = 0.3
         for loop in 1:maxiter+1
             @timeit "filtering" begin
                 @views TopOpt.filter!(x[2:2:end], orientation_filter)
             end
 
             @timeit "assemble stiffness" update_stiffness!(fesolver, x)
-            @timeit "linear solve" fea!(fesolver, f1)
+            @timeit "linear solve" begin
+                fea!(fesolver, f1)
+                u1 = copy(fesolver.solution)
+
+                fea!(fesolver, f2)
+                u2 = copy(fesolver.solution)
+            end
 
             @timeit "evaluate functions" begin
                 # Objective: compliance
-                u = fesolver.solution
-                c = dot(u, fesolver.K, u)
+                c1 = dot(u1, fesolver.K, u1)
+                c2 = dot(u2, fesolver.K, u2)
+                c = (c1^8 + c2^8)^(1 / 8)
 
                 # Constraint: max volume fraction
-                @views g = [x[1:2:end] ⋅ model.elemvol / sum(model.elemvol) / volfrac - 1,]
+                v = x[1:2:end] ⋅ model.elemvol / sum(model.elemvol)
+                @views g = [v / volfrac - 1,]
             end
 
             @timeit "sensitivity analysis" begin
                 # Objective: compliance
-                adjoint_sensitivities!(dcdx, u, u, fesolver)
+                adjoint_sensitivities!(dc1dx, u1, u1, fesolver)
+                adjoint_sensitivities!(dc2dx, u2, u2, fesolver)
+                @views TopOpt.filter!(dc1dx[1:2:end], x[1:2:end], density_filter)
+                @views TopOpt.filter!(dc2dx[1:2:end], x[1:2:end], density_filter)
+                dcdx .= (c1 / c)^7 * dc1dx + (c2 / c)^7 * dc2dx
 
                 # Constraint: max volume fraction
                 dgdx[1, 1:2:end] .= model.elemvol / sum(model.elemvol) / volfrac
                 dgdx[1, 2:2:end] .= 0.0
-
-                # filtering
-                @views TopOpt.filter!(dcdx[1:2:end], x[1:2:end], density_filter)
             end
 
-            change = norm(x - xold1, Inf)
-            @info @sprintf "It = %4d | c = %10.4f | change = %8.2e" (loop - 1) c change
+            # Stopping criterion: relative change in the objective function
+            change = if loop > 1
+                abs(c - history[:objective][end]) / history[:objective][end]
+            else
+                Inf
+            end
+            @info @sprintf "It = %4d | c = %8.4f | c1 = %8.4f | c2 = %8.4f | volfrac = %6.4f | change = %8.2e" (loop - 1) c c1 c2 v change
 
             # update history
             push!(history[:objective], c)
             push!(history[:constraint], g)
+            push!(history[:compliances], [c1, c2])
 
             # export iteration file
             !isnothing(filename) && @timeit "export" begin
@@ -138,13 +161,22 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
                 VTKGridFile(filename_i, grid) do vtk
                     write_cell_data(vtk, x[1:2:end], "density")
                     write_cell_data(vtk, x[2:2:end], "theta")
-                    write_solution(vtk, model.dh, fesolver.solution)
+                    write_solution(vtk, model.dh, u1, "1")
+                    write_solution(vtk, model.dh, u2, "2")
                     pvd[loop] = vtk
                 end
             end
 
-            # Stopping criterion: max change in the design variables
-            change < 0.01 && break
+            # apply continuation
+            if change < 5e-3
+                ρ = @view x[1:2:end]
+                greyness = sum(0.1 .< ρ .< 0.9) / getncells(grid)
+                @info @sprintf "Greyness is %4.1f %%" 100 * greyness
+
+                mat_interp.penal >= 3 && greyness < max_grey && break
+                mat_interp.penal += 1.0
+                @info "Updated p to $(mat_interp.penal)"
+            end
 
             # MMA update
             @timeit "mma update" begin
@@ -165,6 +197,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
             h5open(filename * ".h5", "w") do file
                 write(file, "objective", history[:objective])
                 write(file, "constraint", reduce(hcat, history[:constraint]))
+                write(file, "compliances", reduce(hcat, history[:compliances]))
             end
             @info "Saved file $(filename).h5"
 
