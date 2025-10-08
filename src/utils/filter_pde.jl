@@ -71,7 +71,7 @@ function filter!(x::AbstractVector, f::PDEFilter)
     x .= f.T' * x_filt
 
     # Kf doesnt change, so next solves can reuse the factorization
-    set_phase!(f.ps, Pardiso.NUM_FACT_SOLVE_REFINE)
+    set_phase!(f.ps, Pardiso.SOLVE_ITERATIVE_REFINE)
 end
 
 """
