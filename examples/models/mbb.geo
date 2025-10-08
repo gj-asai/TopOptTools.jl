@@ -12,6 +12,6 @@ Curve Loop(1) = {3, 4, 1, 2};
 Plane Surface(1) = {1};
 
 Transfinite Surface {1};
-Transfinite Curve {1, 3} = 301 Using Progression 1;
-Transfinite Curve {2, 4} = 121 Using Progression 1;
+Transfinite Curve {1, 3} = 101 Using Progression 1;
+Transfinite Curve {2, 4} = 41 Using Progression 1;
 Recombine Surface {1};
