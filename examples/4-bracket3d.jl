@@ -98,7 +98,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
     m, n = 1, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
     xold1, xold2 = similar(x), similar(x)
-    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma)
+    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma, asyinit=0.2, asyincr=1.2, asydecr=0.7, move=0.2)
 
     @info "Starting optimization with p = $(mat_interp.penal)"
     try
