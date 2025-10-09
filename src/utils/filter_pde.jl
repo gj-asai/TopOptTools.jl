@@ -1,6 +1,7 @@
 mutable struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,SS<:MKLPardisoSolver}
     Kf::TK
     T::TT
+    TX::TT
     ps::SS
 end
 
@@ -21,7 +22,8 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
     close!(dh)
 
     Kf = allocate_matrix(dh)
-    T = spzeros(ndofs(dh), getncells(grid))
+    T = spzeros(ndofs(dh), getncells(grid)) # project elements to nodes
+    TX = spzeros(ndofs(dh), getncells(grid)) # project nodes to elements
 
     n_basefuncs = getnbasefunctions(cellvalues)
     Ke = zeros(n_basefuncs, n_basefuncs)
@@ -35,7 +37,8 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
             for i in 1:n_basefuncs
                 Ni = shape_value(cellvalues, q_point, i)
                 ∇Ni = shape_gradient(cellvalues, q_point, i)
-                T[celldofs(cell)[i], cellid(cell)] += Ni * dΩ / model.elemvol[cellid(cell)]
+                T[celldofs(cell)[i], cellid(cell)] += Ni * dΩ
+                TX[celldofs(cell)[i], cellid(cell)] += Ni * dΩ / model.elemvol[cellid(cell)]
                 for j in 1:i
                     Nj = shape_value(cellvalues, q_point, j)
                     ∇Nj = shape_gradient(cellvalues, q_point, j)
@@ -44,7 +47,7 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
             end
         end
 
-        for i in 1:size(Ke, 1), j in i+1:size(Ke, 1)
+        for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
             Ke[i, j] = Ke[j, i]
         end
 
@@ -57,7 +60,7 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
     set_iparm!(ps, 1, 1) # to be able to manually set iparm
     set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
 
-    return PDEFilter(Kf, T, ps)
+    return PDEFilter(Kf, T, TX, ps)
 end
 
 """
@@ -68,7 +71,7 @@ In-place filtering of `x`
 function filter!(x::AbstractVector, f::PDEFilter)
     x_filt = Vector{Float64}(undef, size(f.T, 1))
     pardiso(f.ps, x_filt, f.Kf, f.T * x)
-    x .= f.T' * x_filt
+    x .= f.TX' * x_filt
 
     # Kf doesnt change, so next solves can reuse the factorization
     set_phase!(f.ps, Pardiso.SOLVE_ITERATIVE_REFINE)
