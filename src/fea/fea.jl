@@ -71,12 +71,9 @@ Stores the result in `solver.solution`
 function fea!(solver::FESolver, f::AbstractVector)
     @unpack K, solution, ps = solver
 
-    # solve linear system and store result in solver.u
+    # solve linear system and store result in solver.solution
     pardiso(ps, solution, tril(K), f)
-
-    # the sparsity pattern of K doesnt change, so next solves can skip the symbolic factorization step
-    # this is also the best option if K is exactly the same as in the previous solve
-    set_phase!(ps, Pardiso.NUM_FACT_SOLVE_REFINE)
+    set_phase!(ps, Pardiso.SOLVE_ITERATIVE_REFINE) # reuse K for next solves
 end
 
 """
@@ -106,13 +103,12 @@ end
     update_stiffness!(solver::FESolver, x::AbstractVector)
 
 Recomputes the stiffness matrix, using the new design variables `x`.
-
-This function must always be called before using `fea!` and `adjoint_sensitivities!`, otherwise the system will be solved using the wrong stiffness matrix
+Needed to update the stiffness matrix before calling `fea!` and `adjoint_sensitivities!`
 """
 function update_stiffness!(solver::FESolver, x::AbstractVector)
     solver.x .= x
 
-    @unpack x, K, ∂Ke∂x, chnl = solver
+    @unpack ps, x, K, ∂Ke∂x, chnl = solver
     model = solver.model
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
@@ -145,6 +141,12 @@ function update_stiffness!(solver::FESolver, x::AbstractVector)
 
     # apply boundary conditions
     apply!(K, model.ch)
+
+    # tell Pardiso to recalculate the numerical factorization in the next solve
+    # the sparsity pattern of K doesnt change, skip the symbolic factorization
+    if get_phase(ps) == Pardiso.SOLVE_ITERATIVE_REFINE
+        set_phase!(ps, Pardiso.NUM_FACT_SOLVE_REFINE)
+    end
 end
 
 # xe is a view of the design vector that contains the variables corresponding to one element
@@ -162,7 +164,7 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
         end
     end
 
-    for i in 1:size(Ke, 1), j in i+1:size(Ke, 1)
+    for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
         Ke[i, j] = Ke[j, i]
     end
 end
