@@ -4,7 +4,6 @@ J. Wu, N. Aage, R. Westermann and O. Sigmund
 Infill Optimization for Additive Manufacturing - Approaching Bone-like Porous Structures
 IEEE Trans. on Visualization and Computer Graphics (2017)
 """
-# INFO: assumes that all elements are 1x1
 
 using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
@@ -143,7 +142,7 @@ function infill(vol_local, rρ, rlocal; filename)
 
             # log
             change = norm(x - xold1, Inf)
-            @info @sprintf "It = %4d | c = %10.4f | vol = %5.3f | cons = %8.4f" (loop - 1) c sum(xPhys) / sum(model.elemvol) g[1]
+            @info @sprintf "It = %4d | c = %10.4f | vol = %5.3f | cons = %8.4f" (loop - 1) c xPhys ⋅ model.elemvol / sum(model.elemvol) g[1]
 
             # Update history
             push!(history[:objective], c)

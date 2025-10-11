@@ -19,7 +19,7 @@ function geometry_projection(volfrac; filename)
     pvd = paraview_collection(filename)
 
     # read mesh
-    mesh_file = "examples/models/mbb_gp.msh" # this example contains a rectangular mesh
+    mesh_file = "examples/models/mbb.msh" # this example contains a rectangular mesh
     grid = redirect_stdout(() -> togrid(mesh_file), devnull) # suppress print from the Gmsh.jl call inside togrid
     @info "Done reading $(mesh_file): $(getnnodes(grid)) nodes, $(getncells(grid)) elements"
 
