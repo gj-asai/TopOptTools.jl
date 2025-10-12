@@ -1,10 +1,11 @@
 # task local data for parallel stiffness assemble
 # IMPORTANT: each task works with its own copy of cellvalues and creates a local CellCache
-struct ScratchData{CC,CV,T,A}
+struct ScratchData{CC<:CellCache,CV<:CellValues,M<:Matrix,JCFG<:ForwardDiff.JacobianConfig,A<:Ferrite.AbstractAssembler}
     cell_cache::CC
     cellvalues::CV
-    Ke::Matrix{T}
-    jac::Matrix{T}
+    Ke::M
+    jac::M
+    cfg::JCFG
     assembler::A
 end
 
@@ -16,8 +17,14 @@ function ScratchData(model::FEModel{dim,nvar}, K::SparseMatrixCSC) where {dim,nv
     Ke = zeros(n_basefuncs, n_basefuncs)
     jac = zeros(n_basefuncs * n_basefuncs, nvar)
 
+    cfg = ForwardDiff.JacobianConfig(
+        (Ke, xe) -> element_stiffness!(Ke, xe, cell_cache, model),
+        Ke, zeros(nvar),
+        ForwardDiff.Chunk{nvar}()
+    )
+
     asm = start_assemble(K; fillzero=false)
-    return ScratchData(cell_cache, cellvalues, Ke, jac, asm)
+    return ScratchData(cell_cache, cellvalues, Ke, jac, cfg, asm)
 end
 
 """
@@ -118,20 +125,25 @@ function update_stiffness!(solver::FESolver, x::AbstractVector)
     for color in model.colors
         @tasks for e in color
             scratch = take!(chnl)
-            @unpack cell_cache, cellvalues, Ke, jac, assembler = scratch
+            @unpack cell_cache, cellvalues, Ke, jac, cfg, assembler = scratch
 
             Ferrite.reinit!(cell_cache, e)
             Ferrite.reinit!(cellvalues, cell_cache)
 
             xe = @view x[nvar*(e-1)+1:nvar*e]
 
-            # this updates Ke and obtains ∂Ke∂x via automatic differentiation
-            # uses forward mode because the number of outputs is in general larger than the number of inputs:
-            # Inputs: nvar
-            # Outputs: entries of Ke, e.g. 64 for 2D linear quadrilateral elements
-            ForwardDiff.jacobian!(jac, (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model), Ke, xe)
+            # update Ke and obtain ∂Ke∂x via automatic differentiation
+            ForwardDiff.jacobian!(
+                jac,
+                (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model),
+                Ke, xe, cfg,
+                Val{false}() # disable tag checking because we are rebuilding the anonymous function
+            )
             for var_idx = 1:nvar
-                ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
+                # the following line should work with less allocations but is giving the wrong answer:
+                # copyto!(∂Ke∂x[nvar*(e-1)+var_idx], jac[:, var_idx])
+                # for some reason, not reallocating ∂Ke∂x makes the sensitivities of all elements become the same
+                @views ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
             end
 
             assemble!(assembler, celldofs(cell_cache), Ke)
