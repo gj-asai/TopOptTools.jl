@@ -82,7 +82,7 @@ function geometry_projection(volfrac; filename)
     ddensvdz = zeros(length(dens_v), length(z))
 
     # Initialize linear solver
-    fesolver = FESolver(dens_c, model)
+    fesolver = FESolver(model)
 
     history = Dict(
         :objective => Float64[],

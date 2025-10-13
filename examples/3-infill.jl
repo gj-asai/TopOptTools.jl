@@ -64,7 +64,7 @@ function infill(vol_local, rρ, rlocal; filename)
     x_pde_hat = copy(x)
 
     # initialize FE solver
-    fesolver = FESolver(xPhys, model)
+    fesolver = FESolver(model)
 
     @timeit "build filters" begin
         @info "Building density filter with radius $rρ"

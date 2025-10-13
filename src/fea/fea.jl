@@ -42,23 +42,24 @@ struct FESolver{V<:AbstractVector,VM<:AbstractVector{<:Matrix},FEM<:FEModel,SS<:
 end
 
 """
-    FESolver(x0::AbstractVector, model::FEModel)
+    FESolver(model::FEModel)
 
-Creates a new `FESolver` with the design variables initialized at `x0`
+Creates a new `FESolver` with uninitialized design variables
 """
-function FESolver(x0::AbstractVector, model::FEModel)
+function FESolver(model::FEModel)
     ps = MKLPardisoSolver()
     set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
     set_iparm!(ps, 1, 1) # to be able to manually set iparm
     set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
 
+    # preallocate vectors
+    x0 = Vector{Float64}(undef, getncells(model.grid) * get_nvar(model))
+    solution = similar(x0, ndofs(model.dh))
+
     # preallocate stiffness and sensitivities
     n_basefuncs = getnbasefunctions(model.cellvalues)
     K = allocate_matrix(model.dh)
     ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), length(x0))
-
-    # preallocate solution
-    solution = similar(x0, ndofs(model.dh))
 
     # preallocate thread local containers
     chnl = Channel{ScratchData}(Threads.nthreads())
@@ -66,7 +67,7 @@ function FESolver(x0::AbstractVector, model::FEModel)
         put!(chnl, ScratchData(model, K))
     end
 
-    return FESolver(model, ps, copy(x0), K, ∂Ke∂x, solution, chnl)
+    return FESolver(model, ps, x0, K, ∂Ke∂x, solution, chnl)
 end
 
 """

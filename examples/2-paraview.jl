@@ -114,7 +114,7 @@ function paraview(volfrac, rρ; filename)
     dgdx = zeros(1, getncells(grid))
 
     # initialize FE solver
-    fesolver = FESolver(x, model)
+    fesolver = FESolver(model)
 
     @timeit "build filters" begin
         @info "Building sensitivity filter with radius $rρ"
