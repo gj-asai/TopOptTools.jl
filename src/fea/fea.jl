@@ -30,14 +30,14 @@ end
 """
 Contains the data necessary for the linear system solve and stores the results
 """
-struct FESolver{T<:Real,VT<:AbstractVector{T},FEM<:FEModel,SS<:MKLPardisoSolver,MT<:SparseMatrixCSC{T},SD<:ScratchData}
+struct FESolver{V<:AbstractVector,VM<:AbstractVector{<:Matrix},FEM<:FEModel,SS<:MKLPardisoSolver,M<:SparseMatrixCSC,SD<:ScratchData}
     model::FEM
     ps::SS
 
-    x::VT
-    K::MT
-    ∂Ke∂x::Vector{Matrix{T}}
-    solution::Vector{T}
+    x::V
+    K::M
+    ∂Ke∂x::VM
+    solution::V
     chnl::Channel{SD}
 end
 
@@ -58,7 +58,7 @@ function FESolver(x0::AbstractVector, model::FEModel)
     ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), length(x0))
 
     # preallocate solution
-    solution = zeros(ndofs(model.dh))
+    solution = similar(x0, ndofs(model.dh))
 
     # preallocate thread local containers
     chnl = Channel{ScratchData}(Threads.nthreads())
