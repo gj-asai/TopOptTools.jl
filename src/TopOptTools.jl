@@ -32,8 +32,8 @@ include("fea/fea.jl")
 include("mma/mma.jl")
 
 # Filtering and projection
-include("utils/filter_convolution.jl")
-include("utils/filter_pde.jl")
-include("utils/projection.jl")
+include("filtering/convolution.jl")
+include("filtering/pde.jl")
+include("filtering/heaviside.jl")
 
 end # module TopOptTools
