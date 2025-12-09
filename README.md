@@ -8,10 +8,18 @@ It uses all threads created when Julia started.
 ## Installation
 To add this package as a dependency to your project, run `]add https://github.com/gj-asai/TopOptTools.git`.
 
+To run the examples, start Julia from the root directory with `julia --project=examples/ -t auto` and `include` the file of the example you want to run. Some reasonable parameters that can be tested:
+1. `simp(0.5, 0.5)`
+2. `paraview(0.5, 0.5, filename="path/to/results")`
+3. `infill(0.4, 0.2, 1.0, filename="path/to/results")`
+4. `bracket(0.2, 5.0, 7.0, filename="path/to/results")`
+5. `mm_ecotopopt(350, 0.5, 0.5, 0.5, filename="path/to/results")`
+6. `geometry_projection(0.5, filename="path/to/results")`
+
 ## Structure
 In this repository you can find:
 - `src/`: source code for the module `TopOptTools`
-- `examples/`: collection of scripts showing the usage of the package for different optimization formulations. The directory contains its own `Project.toml` defining an environment to run the scripts. To run the examples, start Julia from the root directory with `julia --project=examples/ -t auto` and include the example file to be able to call the function it defines
+- `examples/`: collection of scripts showing the usage of the package for different optimization formulations. The directory contains its own `Project.toml` defining an environment to run the scripts
 
 ## Author(s)
 This software has been developed by 
