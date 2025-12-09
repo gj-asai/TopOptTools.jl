@@ -7,14 +7,14 @@ IEEE Trans. on Visualization and Computer Graphics (2017)
 
 using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
-using TopOpt
+using TopOptTools
 
 # mutable SIMP, accepts continuation on the penalization
 mutable struct mSIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, simp::mSIMP) = TopOpt.void(Val(2)).C + xe[1]^simp.penal * simp.mat.C
+TopOptTools.interpolate(xe::AbstractVector, simp::mSIMP) = TopOptTools.void(Val(2)).C + xe[1]^simp.penal * simp.mat.C
 
 function infill(vol_local, rρ, rlocal; filename)
     reset_timer!()
@@ -89,7 +89,7 @@ function infill(vol_local, rρ, rlocal; filename)
     beta = 1.0
     eta = 0.5
     plocal = 16
-    vol_max_pnorm = (getncells(grid) * vol_local^plocal)^(1 / plocal)
+    vol_max_pnorm = (sum(model.elemvol) * vol_local^plocal)^(1 / plocal)
 
     @info "Starting optimization with beta = $beta, penal = $(mat_interp.penal)"
     try
@@ -100,7 +100,7 @@ function infill(vol_local, rρ, rlocal; filename)
 
             @timeit "filter and project" begin
                 xTilde .= x
-                TopOpt.filter!(xTilde, density_filter)
+                TopOptTools.filter!(xTilde, density_filter)
 
                 xPhys .= xTilde
                 project_heaviside!(xPhys, beta, eta)
@@ -116,7 +116,7 @@ function infill(vol_local, rρ, rlocal; filename)
 
                 # Constraint: max local volume
                 x_pde_hat .= xPhys
-                TopOpt.filter!(x_pde_hat, local_filter)
+                TopOptTools.filter!(x_pde_hat, local_filter)
                 norm_xlocal = norm(x_pde_hat, plocal)
                 g = [norm_xlocal - vol_max_pnorm,]
             end
@@ -133,11 +133,11 @@ function infill(vol_local, rρ, rlocal; filename)
                 project_heaviside_derivative!(dx, beta, eta)
 
                 dcdx .*= dx
-                TopOpt.filter!(dcdx, density_filter)
+                TopOptTools.filter!(dcdx, density_filter)
 
-                TopOpt.filter!(dgdx, local_filter)
+                TopOptTools.filter!(dgdx, local_filter)
                 dgdx .*= dx
-                TopOpt.filter!(dgdx, density_filter)
+                TopOptTools.filter!(dgdx, density_filter)
             end
 
             # log

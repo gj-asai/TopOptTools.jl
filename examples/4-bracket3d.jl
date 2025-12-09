@@ -8,14 +8,14 @@ Composites: Part A (2025)
 
 using Ferrite, Tensors, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
-using TopOpt
+using TopOptTools
 
 mutable struct mSOMP{dim,T<:Real,CT,V<:Vec} <: MaterialInterpolation{2,T}
     mat::Material{dim,T,CT}
     printing_direction::V
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, somp::mSOMP) = xe[1]^somp.penal * rotate(somp.mat.C, somp.printing_direction, xe[2])
+TopOptTools.interpolate(xe::AbstractVector, somp::mSOMP) = xe[1]^somp.penal * rotate(somp.mat.C, somp.printing_direction, xe[2])
 
 function bracket(volfrac, rρ, rθ, angle=0; filename)
     reset_timer!()
@@ -106,7 +106,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
         max_grey = 0.3
         for loop in 1:maxiter+1
             @timeit "filtering" begin
-                @views TopOpt.filter!(x[2:2:end], orientation_filter)
+                @views TopOptTools.filter!(x[2:2:end], orientation_filter)
             end
 
             @timeit "assemble stiffness" update_stiffness!(fesolver, x)
@@ -133,8 +133,8 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
                 # Objective: compliance
                 adjoint_sensitivities!(dc1dx, u1, u1, fesolver)
                 adjoint_sensitivities!(dc2dx, u2, u2, fesolver)
-                @views TopOpt.filter!(dc1dx[1:2:end], x[1:2:end], density_filter)
-                @views TopOpt.filter!(dc2dx[1:2:end], x[1:2:end], density_filter)
+                @views TopOptTools.filter!(dc1dx[1:2:end], x[1:2:end], density_filter)
+                @views TopOptTools.filter!(dc2dx[1:2:end], x[1:2:end], density_filter)
                 dcdx .= (c1 / c)^7 * dc1dx + (c2 / c)^7 * dc2dx
 
                 # Constraint: max volume fraction

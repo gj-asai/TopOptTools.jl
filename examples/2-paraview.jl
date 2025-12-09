@@ -9,13 +9,13 @@ Stress calculations are not efficient and are performed every iteration
 
 using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
-using TopOpt
+using TopOptTools
 
 struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
+TopOptTools.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
 
 # Returns stresses at the quadrature points for the result stored in solver
 function stress(solver::FESolver)
@@ -24,7 +24,7 @@ function stress(solver::FESolver)
     mat_interp = solver.model.mat_interp
     grid = solver.model.grid
     dh = solver.model.dh
-    dim = TopOpt.get_dim(solver.model)
+    dim = TopOptTools.get_dim(solver.model)
 
     qp_global = [
         [zero(SymmetricTensor{2,dim}) for _ in 1:getnquadpoints(cellvalues)]
@@ -53,7 +53,7 @@ function stress(solver::FESolver)
         for q_point in 1:getnquadpoints(cellvalues)
             xe = @views x[e:e]
             ε = function_symmetric_gradient(cellvalues, q_point, solver.solution, celldofs(cell))
-            σ = TopOpt.interpolate(xe, mat_interp) ⊡ ε
+            σ = TopOptTools.interpolate(xe, mat_interp) ⊡ ε
             s = dev(σ)
 
             cell_global[q_point] = σ
@@ -161,7 +161,7 @@ function paraview(volfrac, rρ; filename)
                 dgdx .= model.elemvol' / sum(model.elemvol) / volfrac
 
                 # sensitivity filtering
-                TopOpt.filter!(dcdx, x, density_filter)
+                TopOptTools.filter!(dcdx, x, density_filter)
             end
 
             # log

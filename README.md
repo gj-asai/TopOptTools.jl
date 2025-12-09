@@ -1,4 +1,4 @@
-# TopOpt tools in Julia
+# TopOpt Tools in Julia
 This package provides tools for Finite Element Analysis, variable updating via the Method of Moving Asymptotes and filtering.
 They implement an abstraction layer to functionality commonly used in density-based topology optimization scripts.
 
@@ -6,12 +6,12 @@ Parallelization is done via multithreading, which enables some level of scalabil
 It uses all threads created when Julia started.
 
 ## Installation
-To add this package as a dependency to your project, run `]add https://github.com/gj-asai/TopOpt.git`.
+To add this package as a dependency to your project, run `]add https://github.com/gj-asai/TopOptTools.git`.
 
 ## Structure
 In this repository you can find:
-- `src/`: source code for the module `TopOpt`
-- `examples/`: collection of scripts showing the usage of the package for different optimization formulations. The directory contains its own `Project.toml` defining an environment to run the scripts.
+- `src/`: source code for the module `TopOptTools`
+- `examples/`: collection of scripts showing the usage of the package for different optimization formulations. The directory contains its own `Project.toml` defining an environment to run the scripts. To run the examples, start Julia from the root directory with `julia --project=examples/ -t auto` and include the example file to be able to call the function it defines
 
 ## Author(s)
 This software has been developed by 

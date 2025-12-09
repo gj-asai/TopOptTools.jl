@@ -4,7 +4,7 @@ Multi-material topology optimization for ecoefficiency
 
 using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
-using TopOpt
+using TopOptTools
 
 mutable struct MMSOMP{dim,M,N,T<:Real,CT} <: MaterialInterpolation{N,T}
     mat::Vector{Material{dim,T,CT}}
@@ -12,7 +12,7 @@ mutable struct MMSOMP{dim,M,N,T<:Real,CT} <: MaterialInterpolation{N,T}
 end
 MMSOMP(mat::Vector{Material{dim,T,CT}}, penal::T) where {dim,T,CT} = MMSOMP{dim,length(mat),length(mat) + 1,T,CT}(mat, penal)
 
-function TopOpt.interpolate(xe::AbstractVector{T}, interp::MMSOMP{2}) where {T<:Real}
+function TopOptTools.interpolate(xe::AbstractVector{T}, interp::MMSOMP{2}) where {T<:Real}
     ρ, θ = xe[1:end-1], xe[end]
     result = zero(SymmetricTensor{4,2,T})
     for i in eachindex(interp.mat)
@@ -26,7 +26,7 @@ function TopOpt.interpolate(xe::AbstractVector{T}, interp::MMSOMP{2}) where {T<:
         end
         result += weight * rotate(interp.mat[i].C, θ)
     end
-    result += TopOpt.void(Val(2)).C
+    result += TopOptTools.void(Val(2)).C
     return result
 end
 
@@ -133,9 +133,10 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
 
             @timeit "filter and project" begin
                 xTilde .= x
-                @views TopOpt.filter!(xTilde[1:3:end], density_filter)
-                @views TopOpt.filter!(xTilde[2:3:end], density_filter)
-                @views TopOpt.filter!(xTilde[3:3:end], orientation_filter)
+
+                @views TopOptTools.filter!(xTilde[1:3:end], density_filter)
+                @views TopOptTools.filter!(xTilde[2:3:end], density_filter)
+                @views TopOptTools.filter!(xTilde[3:3:end], orientation_filter)
 
                 xPhys .= xTilde
                 @views project_heaviside!(xPhys[1:3:end], beta, eta)
@@ -183,16 +184,16 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
                 # densities
                 for i in 1:2
                     dCO2dx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
-                    @views TopOpt.filter!(dCO2dx[i:3:end], density_filter) # xTilde -> x
+                    @views TopOptTools.filter!(dCO2dx[i:3:end], density_filter) # xTilde -> x
 
                     dcdx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
-                    @views TopOpt.filter!(dcdx[i:3:end], density_filter) # xTilde -> x
+                    @views TopOptTools.filter!(dcdx[i:3:end], density_filter) # xTilde -> x
 
                     dvdx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
-                    @views TopOpt.filter!(dvdx[i:3:end], density_filter) # xTilde -> x
+                    @views TopOptTools.filter!(dvdx[i:3:end], density_filter) # xTilde -> x
                 end
                 # angles, no need to filter dCO2dtheta and dvdtheta, they are all zero
-                @views TopOpt.filter!(dcdx[3:3:end], orientation_filter)
+                @views TopOptTools.filter!(dcdx[3:3:end], orientation_filter)
 
                 # all constraints
                 dgdx[1, :] .= dcdx / comp_max

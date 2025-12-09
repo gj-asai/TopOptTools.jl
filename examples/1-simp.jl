@@ -8,14 +8,14 @@ Structural and Multidisciplinary Optimization (2011)
 
 using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, GLMakie
-using TopOpt
+using TopOptTools
 
 # defining a power law MaterialInterpolation with 1 design variable per element
 struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
     penal::T
 end
-TopOpt.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
+TopOptTools.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
 
 function simp(volfrac, rρ)
     reset_timer!()
@@ -101,7 +101,7 @@ function simp(volfrac, rρ)
                 dgdx .= model.elemvol' / sum(model.elemvol) / volfrac
 
                 # sensitivity filtering
-                TopOpt.filter!(dcdx, x, density_filter)
+                TopOptTools.filter!(dcdx, x, density_filter)
             end
 
             # log and plot

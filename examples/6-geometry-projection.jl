@@ -7,12 +7,12 @@ Structural and Multidisciplinary Optimization, 2020
 
 using Ferrite, FerriteGmsh, LinearAlgebra
 using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
-using TopOpt
+using TopOptTools
 
 struct Linear{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
     mat::Material{dim,T,CT}
 end
-TopOpt.interpolate(xe::AbstractVector, linear::Linear) = xe[1] * linear.mat.C
+TopOptTools.interpolate(xe::AbstractVector, linear::Linear) = xe[1] * linear.mat.C
 
 function geometry_projection(volfrac; filename)
     reset_timer!()
