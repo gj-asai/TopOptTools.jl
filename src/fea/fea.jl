@@ -1,6 +1,6 @@
 # task local data for parallel stiffness assemble
 # IMPORTANT: each task works with its own copy of cellvalues and creates a local CellCache
-struct ScratchData{CC<:CellCache,CV<:CellValues,M<:Matrix,JCFG<:ForwardDiff.JacobianConfig,A<:Ferrite.AbstractAssembler}
+struct FEAScratchData{CC<:CellCache,CV<:CellValues,M<:Matrix,JCFG<:ForwardDiff.JacobianConfig,A<:Ferrite.AbstractAssembler}
     cell_cache::CC
     cellvalues::CV
     Ke::M
@@ -9,7 +9,7 @@ struct ScratchData{CC<:CellCache,CV<:CellValues,M<:Matrix,JCFG<:ForwardDiff.Jaco
     assembler::A
 end
 
-function ScratchData(model::FEModel{dim,nvar}, K::SparseMatrixCSC) where {dim,nvar}
+function FEAScratchData(model::FEModel{dim,nvar}, K::SparseMatrixCSC) where {dim,nvar}
     cell_cache = CellCache(model.dh)
     cellvalues = copy(model.cellvalues)
 
@@ -24,13 +24,13 @@ function ScratchData(model::FEModel{dim,nvar}, K::SparseMatrixCSC) where {dim,nv
     )
 
     asm = start_assemble(K; fillzero=false)
-    return ScratchData(cell_cache, cellvalues, Ke, jac, cfg, asm)
+    return FEAScratchData(cell_cache, cellvalues, Ke, jac, cfg, asm)
 end
 
 """
 Contains the data necessary for the linear system solve and stores the results
 """
-struct FESolver{V<:AbstractVector,VM<:AbstractVector{<:Matrix},FEM<:FEModel,SS<:MKLPardisoSolver,M<:SparseMatrixCSC,SD<:ScratchData}
+struct FESolver{V<:AbstractVector,VM<:AbstractVector{<:Matrix},FEM<:FEModel,SS<:MKLPardisoSolver,M<:SparseMatrixCSC,SD<:FEAScratchData}
     model::FEM
     ps::SS
 
@@ -62,9 +62,9 @@ function FESolver(model::FEModel)
     ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), length(x0))
 
     # preallocate thread local containers
-    chnl = Channel{ScratchData}(Threads.nthreads())
+    chnl = Channel{FEAScratchData}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
-        put!(chnl, ScratchData(model, K))
+        put!(chnl, FEAScratchData(model, K))
     end
 
     return FESolver(model, ps, x0, K, ∂Ke∂x, solution, chnl)
@@ -141,9 +141,6 @@ function update_stiffness!(solver::FESolver, x::AbstractVector)
                 Val{false}() # disable tag checking because we are rebuilding the anonymous function
             )
             for var_idx = 1:nvar
-                # the following line should work with less allocations but is giving the wrong answer:
-                # copyto!(∂Ke∂x[nvar*(e-1)+var_idx], jac[:, var_idx])
-                # for some reason, not reallocating ∂Ke∂x makes the sensitivities of all elements become the same
                 @views ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
             end
 

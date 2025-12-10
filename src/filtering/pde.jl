@@ -1,12 +1,48 @@
+# task-local scratch data to build filter in parallel
+struct PDEScratchData{CC<:CellCache,CV<:CellValues,M<:Matrix,V<:Vector,A<:Ferrite.AbstractAssembler}
+    cell_cache::CC
+    cellvalues::CV
+
+    # preallocated element arrays
+    Ke::M
+    Te::V
+    TXe::V
+
+    # thread-local interpolation sparse matrices
+    I_::Vector{Int}
+    J_::Vector{Int}
+    T_::V
+    TX_::V
+
+    # for stiffness matrix
+    assembler::A
+end
+
+function PDEScratchData(cv::CellValues, dh::DofHandler, K::SparseMatrixCSC)
+    cell_cache = CellCache(dh)
+    cellvalues = copy(cv)
+
+    n_basefuncs = getnbasefunctions(cv)
+    Ke = zeros(n_basefuncs, n_basefuncs)
+    Te = zeros(n_basefuncs)
+    TXe = zeros(n_basefuncs)
+
+    I_, J_ = Int[], Int[]
+    T_, TX_ = Float64[], Float64[]
+
+    asm = start_assemble(K; fillzero=false)
+    return PDEScratchData(cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, asm)
+end
+
 mutable struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,SS<:MKLPardisoSolver}
-    Kf::TK
-    T::TT
-    TX::TT
-    ps::SS
+    Kf::TK # stiffness matrix
+    T::TT  # project elements to nodes
+    TX::TT # project nodes to elements
+    ps::SS # linear solver
 end
 
 """
-    PDEFilter(radius::Float64, model::FEModel)
+    PDEFilter(radius, model::FEModel)
 
 Creates an isotropic Helmholtz PDE filter of radius `radius` for the mesh stored in `model`
 """
@@ -16,44 +52,77 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
     r_filter = radius / (2 * sqrt(3))
     Kd = r_filter^2 * one(Tensor{2,dim}) # isotropic filter
 
-    cellvalues = CellValues(qr, ip)
+    cv = CellValues(qr, ip)
     dh = DofHandler(grid)
     add!(dh, :x, ip)
     close!(dh)
 
+    # preallocate matrices
     Kf = allocate_matrix(dh)
-    T = spzeros(ndofs(dh), getncells(grid)) # project elements to nodes
-    TX = spzeros(ndofs(dh), getncells(grid)) # project nodes to elements
+    chnl = Channel{PDEScratchData}(Threads.nthreads())
+    foreach(1:Threads.nthreads()) do _
+        put!(chnl, PDEScratchData(cv, dh, Kf))
+    end
 
-    n_basefuncs = getnbasefunctions(cellvalues)
-    Ke = zeros(n_basefuncs, n_basefuncs)
-    assembler = start_assemble(Kf)
-    for cell in CellIterator(dh)
-        Ferrite.reinit!(cellvalues, cell)
-        fill!(Ke, 0.0)
+    n_basefuncs = getnbasefunctions(cv)
+    start_assemble(Kf)
+    for color in model.colors
+        @tasks for e in color
+            scratch = take!(chnl)
+            @unpack cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, assembler = scratch
 
-        @inbounds for q_point in 1:getnquadpoints(cellvalues)
-            dΩ = getdetJdV(cellvalues, q_point)
-            for i in 1:n_basefuncs
-                Ni = shape_value(cellvalues, q_point, i)
-                ∇Ni = shape_gradient(cellvalues, q_point, i)
-                T[celldofs(cell)[i], cellid(cell)] += Ni * dΩ
-                TX[celldofs(cell)[i], cellid(cell)] += Ni * dΩ / model.elemvol[cellid(cell)]
-                for j in 1:i
-                    Nj = shape_value(cellvalues, q_point, j)
-                    ∇Nj = shape_gradient(cellvalues, q_point, j)
-                    Ke[i, j] += (∇Ni ⋅ Kd ⋅ ∇Nj + Ni ⋅ Nj) * dΩ
+            Ferrite.reinit!(cell_cache, e)
+            Ferrite.reinit!(cellvalues, cell_cache)
+
+            fill!(Ke, 0.0)
+            fill!(Te, 0.0)
+            fill!(TXe, 0.0)
+
+            @inbounds for q_point in 1:getnquadpoints(cellvalues)
+                dΩ = getdetJdV(cellvalues, q_point)
+                for i in 1:n_basefuncs
+                    Ni = shape_value(cellvalues, q_point, i)
+                    ∇Ni = shape_gradient(cellvalues, q_point, i)
+                    Te[i] += Ni * dΩ
+                    TXe[i] += Ni * dΩ / model.elemvol[e]
+                    for j in 1:i
+                        Nj = shape_value(cellvalues, q_point, j)
+                        ∇Nj = shape_gradient(cellvalues, q_point, j)
+                        Ke[i, j] += (∇Ni ⋅ Kd ⋅ ∇Nj + Ni ⋅ Nj) * dΩ
+                    end
                 end
             end
-        end
 
-        for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
-            Ke[i, j] = Ke[j, i]
-        end
+            for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
+                Ke[i, j] = Ke[j, i]
+            end
 
-        assemble!(assembler, celldofs(cell), Ke)
+            # TODO: make this zero-allocation
+            append!(I_, celldofs(cell_cache))
+            append!(J_, repeat([e], n_basefuncs))
+            append!(T_, Te)
+            append!(TX_, TXe)
+
+            assemble!(assembler, celldofs(cell_cache), Ke)
+            put!(chnl, scratch)
+        end
     end
+    close(chnl) # no more put!, now we can iterate on chnl
+
     tril!(Kf) # Pardiso solver will use only the lower part of the matrix
+
+    # single-threaded final assembly
+    I, J = Int[], Int[]
+    VT, VTX = Float64[], Float64[]
+    for scratch in chnl
+        append!(I, scratch.I_)
+        append!(J, scratch.J_)
+        append!(VT, scratch.T_)
+        append!(VTX, scratch.TX_)
+    end
+
+    T = sparse(I, J, VT, ndofs(dh), getncells(grid))
+    TX = sparse(I, J, VTX, ndofs(dh), getncells(grid))
 
     ps = MKLPardisoSolver()
     set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
