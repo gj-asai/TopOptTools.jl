@@ -3,7 +3,7 @@ This package provides tools for Finite Element Analysis, variable updating via t
 They implement an abstraction layer to functionality commonly used in density-based topology optimization scripts.
 Check the exported members of module `TopOptTools` for an overview of the available tools.
 
-Mechanical analysis and PDE filter use [`Ferrite.jl`](https://github.com/Ferrite-FEM/Ferrite.jl) finite element toolbox.
+Mechanical (linear elasticity) analysis and PDE filter use [`Ferrite.jl`](https://github.com/Ferrite-FEM/Ferrite.jl) finite element toolbox.
 Derivatives of the stiffness matrix with respect to the element variables are computed via automatic differentiation - [`ForwardDiff.jl`](https://github.com/JuliaDiff/ForwardDiff.jl).
 The linear systems are solved using MKL Pardiso's sparse direct solver via [`Pardiso.jl`](https://github.com/JuliaSparse/Pardiso.jl), reusing symbolic and numerical factorizations when possible.
 
@@ -11,7 +11,7 @@ Parallelization is done via multithreading, which enables some level of scalabil
 Task scheduling during multithreaded finite element matrices assembly is handled using [`OhMyThreads.jl`](https://github.com/JuliaFolds2/OhMyThreads.jl) and uses all threads started with Julia.
 The linear solver is kept at its default configuration, which uses half of the available threads.
 
-MMA subproblems are solved with [`Optim.jl`](https://github.com/JuliaNLSolvers/Optim.jl)'s dual solver, not parallelized.
+MMA subproblems are solved with [`Optim.jl`](https://github.com/JuliaNLSolvers/Optim.jl). The dual problem is solved with the default configuration for box constrained optimizations: Fminbox (a barrier method) with L-BGFS as line search algorithm.
 
 > [!NOTE]
 > The `TopOptTools` module uses [`MKL.jl`](https://github.com/JuliaLinearAlgebra/MKL.jl) instead of the default BLAS backend. This may affect multithreaded code that interacts with it
@@ -33,6 +33,7 @@ To run the examples, start Julia from the root directory with `julia --project=e
 > - `results/mbb.pvd`: Paraview Data File to visualize all iterations as a time series
 > - `results/mbb.h5`: HDF5 file containing the convergence history. Data is flattened to be compatible with other HDF5 readers
 > - `results/mbb.design.jld2`: JLD2 file containing the design variables at the final iteration. It is HDF5-compatible but best suited for post-processing by Julia code
+>
 > The full path to the parent directory (`results/` in this case) must already exist, and existing files in it may be overwritten
 
 ## Structure
