@@ -40,6 +40,7 @@ To run the examples, start Julia from the root directory with `julia --project=e
 In this repository you can find:
 - `src/`: source code for the module `TopOptTools`
 - `examples/`: collection of scripts showing the usage of the package for different optimization formulations. The directory contains its own `Project.toml` defining an environment to run the scripts
+  - `examples/models/`: `.geo` and `.msh` [Gmsh](https://gmsh.info/) files. The meshes are imported to the scripts using [`FerriteGmsh.jl`](https://github.com/Ferrite-FEM/FerriteGmsh.jl)
 
 ## Author(s)
 This software has been developed by 
@@ -47,7 +48,7 @@ This software has been developed by
 
 ## License
 
-The contents of this repository are licensed under an **Apache License v2.0** (see [LICENSE](LICENSE)
+The contents of this repository are licensed under an **Apache License v2.0** (see [LICENSE](LICENSE))
 
 Copyright notice:
 
