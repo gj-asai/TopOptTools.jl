@@ -17,7 +17,7 @@ MMA subproblems are solved with [`Optim.jl`](https://github.com/JuliaNLSolvers/O
 > The `TopOptTools` module uses [`MKL.jl`](https://github.com/JuliaLinearAlgebra/MKL.jl) instead of the default BLAS backend. This may affect multithreaded code that interacts with it
 
 ## Installation
-To add this package as a dependency to your project, run `]add https://github.com/gj-asai/TopOptTools.git`.
+To add this package as a dependency to your project, run `]add https://gitlab.tudelft.nl/shapingmatterlab/TopOptTools.jl.git`.
 
 To run the examples, start Julia from the root directory with `julia --project=examples/ -t auto` and `include` the file of the example you want to run. Some reasonable parameters that can be tested in each example:
 1. `simp(0.5, 0.5)`
@@ -45,4 +45,13 @@ In this repository you can find:
 This software has been developed by 
 **Gustavo Asai** ![ORCID logo](https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png) [0009-0007-6133-6471](https://orcid.org/0009-0007-6133-6471), Technische Universiteit Delft
 
-WIP
+## License
+
+The contents of this repository are licensed under an **Apache License v2.0** (see [LICENSE](LICENSE)
+
+Copyright notice:
+
+Technische Universiteit Delft hereby disclaims all copyright interest in the program "TopOptTools.jl". It is a Julia package with tools for density-based topology optimization scripts.
+Henri Werij, Faculty of Aerospace Engineering, Technische Universiteit Delft.
+
+&copy; 2025, G.J. Asai
