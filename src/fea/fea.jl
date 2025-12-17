@@ -1,44 +1,40 @@
 # task local data for parallel stiffness assemble
-# IMPORTANT: each task works with its own copy of cellvalues and creates a local CellCache
-struct FEAScratchData{CC<:CellCache,CV<:CellValues,M<:Matrix,JCFG<:ForwardDiff.JacobianConfig,A<:Ferrite.AbstractAssembler}
+struct StiffnessScratch{CC<:CellCache,CV<:CellValues,JCFG<:ForwardDiff.JacobianConfig,A<:Ferrite.AbstractAssembler}
     cell_cache::CC
     cellvalues::CV
-    Ke::M
-    jac::M
+    Ke::Matrix{Float64}
+    jac::Matrix{Float64}
     cfg::JCFG
     assembler::A
 end
-
-function FEAScratchData(model::FEModel{dim,nvar}, K::SparseMatrixCSC) where {dim,nvar}
+function StiffnessScratch(model::FEModel{dim,nvar}, asm::Ferrite.AbstractAssembler) where {dim,nvar}
     cell_cache = CellCache(model.dh)
     cellvalues = copy(model.cellvalues)
-
     n_basefuncs = getnbasefunctions(cellvalues)
+
     Ke = zeros(n_basefuncs, n_basefuncs)
     jac = zeros(n_basefuncs * n_basefuncs, nvar)
-
     cfg = ForwardDiff.JacobianConfig(
         (Ke, xe) -> element_stiffness!(Ke, xe, cell_cache, model),
         Ke, zeros(nvar),
         ForwardDiff.Chunk{nvar}()
     )
 
-    asm = start_assemble(K; fillzero=false)
-    return FEAScratchData(cell_cache, cellvalues, Ke, jac, cfg, asm)
+    return StiffnessScratch(cell_cache, cellvalues, Ke, jac, cfg, asm)
 end
 
 """
 Contains the data necessary for the linear system solve and stores the results
 """
-struct FESolver{V<:AbstractVector,VM<:AbstractVector{<:Matrix},FEM<:FEModel,SS<:MKLPardisoSolver,M<:SparseMatrixCSC,SD<:FEAScratchData}
+struct FESolver{FEM<:FEModel,SS<:StiffnessScratch}
     model::FEM
-    ps::SS
+    ps::MKLPardisoSolver
 
-    x::V
-    K::M
-    ∂Ke∂x::VM
-    solution::V
-    chnl::Channel{SD}
+    x::Vector{Float64}
+    K::SparseMatrixCSC{Float64,Int}
+    ∂Ke∂x::Vector{Matrix{Float64}}
+    solution::Vector{Float64}
+    chnl::Channel{SS}
 end
 
 """
@@ -62,9 +58,10 @@ function FESolver(model::FEModel)
     ∂Ke∂x = fill(zeros(n_basefuncs, n_basefuncs), length(x0))
 
     # preallocate thread local containers
-    chnl = Channel{FEAScratchData}(Threads.nthreads())
+    chnl = Channel{StiffnessScratch}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
-        put!(chnl, FEAScratchData(model, K))
+        asm = start_assemble(K; fillzero=false)
+        put!(chnl, StiffnessScratch(model, asm))
     end
 
     return FESolver(model, ps, x0, K, ∂Ke∂x, solution, chnl)
@@ -85,14 +82,14 @@ function fea!(solver::FESolver, f::AbstractVector)
 end
 
 """
-    adjoint_sensitivities!(dfdx, lambda, displacements, solver::FESolver)
+    adjoint_sensitivities!(dJdx, lambda, displacements, solver::FESolver)
 
-Uses the adjoint system to compute the sensitivities ∂f/∂x of a function f(u).
+Uses the adjoint system to compute the sensitivities ∂J/∂x of a function J(u).
 
-`lambda` is the vector of adjoint variables, obtained from calling `fea!` with right hand side df/du.
+`lambda` is the vector of adjoint variables, obtained from calling `fea!` with right hand side dJ/du.
 `displacements` is the vector of nodal displacements, obtained from calling `fea!` with right hand side equal to the forces vector
 """
-function adjoint_sensitivities!(dfdx, lambda, displacements, solver::FESolver)
+function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FESolver)
     model = solver.model
     ∂Ke∂x = solver.∂Ke∂x
     for cell in CellIterator(model.dh)
@@ -102,7 +99,7 @@ function adjoint_sensitivities!(dfdx, lambda, displacements, solver::FESolver)
         @views ue, lambdae = lambda[dofs], displacements[dofs]
         nvar = get_nvar(model)
         for i in 1:nvar
-            dfdx[nvar*(e-1)+i] = -dot(lambdae, ∂Ke∂x[nvar*(e-1)+i], ue)
+            dJdx[nvar*(e-1)+i] = -dot(lambdae, ∂Ke∂x[nvar*(e-1)+i], ue)
         end
     end
 end
@@ -166,10 +163,10 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
     @inbounds for q_point in 1:getnquadpoints(cellvalues)
         dΩ = getdetJdV(cellvalues, q_point)
         for i in 1:getnbasefunctions(cellvalues)
-            δεi = shape_symmetric_gradient(cellvalues, q_point, i)
+            ∇sδεi = shape_symmetric_gradient(cellvalues, q_point, i)
             for j in 1:i
-                δεj = shape_symmetric_gradient(cellvalues, q_point, j)
-                Ke[i, j] += δεi ⊡ interpolate(xe, model.mat_interp) ⊡ δεj * dΩ
+                ∇sδεj = shape_symmetric_gradient(cellvalues, q_point, j)
+                Ke[i, j] += ∇sδεi ⊡ interpolate(xe, model.mat_interp) ⊡ ∇sδεj * dΩ
             end
         end
     end
@@ -177,51 +174,4 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
     for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
         Ke[i, j] = Ke[j, i]
     end
-end
-
-"""
-    compute_force_vector(loads::Vector{<:Load}, model::FEModel)
-
-Returns the nodal forces vector corresponding to the load case `loads`, with the Dirichlet boundary conditions in `model` already applied
-"""
-function compute_force_vector(loads::Vector{<:Load}, model::FEModel{dim}) where {dim}
-    f = zeros(ndofs(model.dh))
-    fe = zeros(getnbasefunctions(model.facetvalues))
-
-    for cell in CellIterator(model.dh)
-        dofs = celldofs(cell)
-
-        # nodal forces
-        for force in loads
-            force isa NodalLoad || continue
-
-            for (i, node) in enumerate(getnodes(cell))
-                node in getnodeset(model.grid, force.nodeset_name) || continue
-                f[dofs[dim*(i-1)+1:dim*i]] .+= force.F
-            end
-        end
-
-        # linear forces
-        for force in loads
-            force isa LinearLoad || continue
-
-            fill!(fe, 0.0)
-            for facet in 1:nfacets(cell)
-                (cellid(cell), facet) in getfacetset(model.grid, force.faceset_name) || continue
-
-                Ferrite.reinit!(model.facetvalues, cell, facet)
-                for q_point in 1:getnquadpoints(model.facetvalues)
-                    dΓ = getdetJdV(model.facetvalues, q_point)
-                    for i in 1:getnbasefunctions(model.facetvalues)
-                        δu = shape_value(model.facetvalues, q_point, i)
-                        fe[i] += (δu ⋅ force.F) * dΓ
-                    end
-                end
-            end
-            assemble!(f, dofs, fe)
-        end
-    end
-
-    apply!(f, model.ch)
-    return f
 end

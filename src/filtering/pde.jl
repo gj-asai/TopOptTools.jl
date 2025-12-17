@@ -1,24 +1,24 @@
 # task-local scratch data to build filter in parallel
-struct PDEScratchData{CC<:CellCache,CV<:CellValues,M<:Matrix,V<:Vector,A<:Ferrite.AbstractAssembler}
+struct PDEFilterScratch{CC<:CellCache,CV<:CellValues,A<:Ferrite.AbstractAssembler}
     cell_cache::CC
     cellvalues::CV
 
     # preallocated element arrays
-    Ke::M
-    Te::V
-    TXe::V
+    Ke::Matrix{Float64}
+    Te::Vector{Float64}
+    TXe::Vector{Float64}
 
     # thread-local interpolation sparse matrices
     I_::Vector{Int}
     J_::Vector{Int}
-    T_::V
-    TX_::V
+    T_::Vector{Float64}
+    TX_::Vector{Float64}
 
     # for stiffness matrix
     assembler::A
 end
 
-function PDEScratchData(cv::CellValues, dh::DofHandler, K::SparseMatrixCSC)
+function PDEFilterScratch(cv::CellValues, dh::DofHandler, asm::Ferrite.AbstractAssembler)
     cell_cache = CellCache(dh)
     cellvalues = copy(cv)
 
@@ -30,11 +30,10 @@ function PDEScratchData(cv::CellValues, dh::DofHandler, K::SparseMatrixCSC)
     I_, J_ = Int[], Int[]
     T_, TX_ = Float64[], Float64[]
 
-    asm = start_assemble(K; fillzero=false)
-    return PDEScratchData(cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, asm)
+    return PDEFilterScratch(cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, asm)
 end
 
-mutable struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,SS<:MKLPardisoSolver}
+struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,SS<:MKLPardisoSolver}
     Kf::TK # stiffness matrix
     T::TT  # project elements to nodes
     TX::TT # project nodes to elements
@@ -59,9 +58,10 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
 
     # preallocate matrices
     Kf = allocate_matrix(dh)
-    chnl = Channel{PDEScratchData}(Threads.nthreads())
+    chnl = Channel{PDEFilterScratch}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
-        put!(chnl, PDEScratchData(cv, dh, Kf))
+        asm = start_assemble(Kf; fillzero=false)
+        put!(chnl, PDEFilterScratch(cv, dh, asm))
     end
 
     n_basefuncs = getnbasefunctions(cv)

@@ -47,8 +47,8 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
 
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
-    f1 = compute_force_vector(loads1, model)
-    f2 = compute_force_vector(loads2, model)
+    f1 = compute_rhs(loads1, model)
+    f2 = compute_rhs(loads2, model)
 
     # initialize design variables
     x = collect(Iterators.flatten(zip(

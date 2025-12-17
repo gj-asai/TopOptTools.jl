@@ -26,6 +26,7 @@ To run the examples, start Julia from the root directory with `julia --project=e
 4. `bracket(0.2, 5.0, 7.0, filename="path/to/results")`
 5. `mm_ecotopopt(350, 0.5, 0.5, 0.5, filename="path/to/results")`
 6. `geometry_projection(0.5, filename="path/to/results")`
+7. `thermal_actuator(0.5, 0.5, filename="path/to/results")`
 
 > [!TIP]
 > If `filename` is set to `"results/mbb"`, the script will create the files:

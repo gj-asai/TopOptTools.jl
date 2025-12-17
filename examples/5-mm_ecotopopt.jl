@@ -65,7 +65,7 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
 
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
-    f = compute_force_vector(loads, model)
+    f = compute_rhs(loads, model)
 
     # initialize design variables
     x = collect(Iterators.flatten(zip(

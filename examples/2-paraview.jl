@@ -104,7 +104,7 @@ function paraview(volfrac, rρ; filename)
 
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
-    f = compute_force_vector(loads, model)
+    f = compute_rhs(loads, model)
 
     # initialize design variables
     x = fill(volfrac, getncells(grid))

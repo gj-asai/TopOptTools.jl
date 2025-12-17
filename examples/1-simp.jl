@@ -50,7 +50,7 @@ function simp(volfrac, rρ)
 
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
-    f = compute_force_vector(loads, model)
+    f = compute_rhs(loads, model)
     nelx, nely = [xmax, ymax] / sqrt(model.elemvol[1]) .|> round .|> Int # assuming identical square elements
 
     # initialize design variables

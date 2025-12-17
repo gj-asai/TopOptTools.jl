@@ -14,9 +14,9 @@ using Pardiso,
 
 export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D
 export MaterialInterpolation
-export NodalLoad, LinearLoad
 export FEModel
-export FESolver, fea!, adjoint_sensitivities!, update_stiffness!, compute_force_vector
+export FESolver, fea!, adjoint_sensitivities!, update_stiffness!
+export NodalLoad, LinearLoad, EigenstrainLoad, compute_rhs, compute_rhs!
 export MMAWorkspace, mma_update!
 export ConvolutionFilter, PDEFilter, filter!
 export project_heaviside!, project_heaviside_derivative!
@@ -24,9 +24,9 @@ export project_heaviside!, project_heaviside_derivative!
 # Finite element analysis
 include("fea/material.jl")
 include("fea/material_interpolation.jl")
-include("fea/loads.jl")
 include("fea/femodel.jl")
 include("fea/fea.jl")
+include("fea/loads.jl")
 
 # MMA
 include("mma/mma.jl")

@@ -1,7 +1,6 @@
 "Struct that holds the geometric, material and boundary conditions data of a finite element model"
-struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},BT<:BallTree,CV<:CellValues,FV<:FacetValues,IP<:Interpolation,QR<:QuadratureRule}
+struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},CV<:CellValues,FV<:FacetValues,IP<:Interpolation,QR<:QuadratureRule}
     grid::G
-    balltree::BT
     centers::Matrix{T}
     elemvol::Vector{T}
 
@@ -23,9 +22,8 @@ get_dim(::FEModel{dim}) where {dim} = dim
 """
      FEModel(; grid::Grid, ip::Interpolation, qr::QuadratureRule, mat_interp::MaterialInterpolation, constraints::Vector{Dirichlet}) 
 
-Creates the finite element model and also computes the element volumes,
-a coloring of the grid for parallel assemble and
-the data structure for efficient filter generation
+Creates the finite element model and also computes the element volumes and
+a coloring of the grid for parallel assemble
 """
 function FEModel(;
     grid::Grid{dim},
@@ -63,6 +61,7 @@ function FEModel(;
         end
     end
 
+    # element centroids
     centers = zeros(dim, getncells(grid))
     for cell in CellIterator(dh)
         id = cellid(cell)
@@ -71,7 +70,6 @@ function FEModel(;
         end
         centers[:, id] ./= Ferrite.nnodes_per_cell(grid, id)
     end
-    tree = BallTree(centers)
 
-    return FEModel(grid, tree, centers, elemvol, mat_interp, constraints, cellvalues, facetvalues, ip, qr, dh, ch, colors)
+    return FEModel(grid, centers, elemvol, mat_interp, constraints, cellvalues, facetvalues, ip, qr, dh, ch, colors)
 end

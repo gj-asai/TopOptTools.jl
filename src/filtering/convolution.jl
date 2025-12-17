@@ -13,6 +13,8 @@ function ConvolutionFilter(radius, model::FEModel)
     radius == 0 && return ConvolutionFilter(sparse(I, n, n))
 
     centers = model.centers
+    tree = BallTree(centers)
+
     iH, jH = Int32[], Int32[]
     sH = Float64[]
 
@@ -22,7 +24,7 @@ function ConvolutionFilter(radius, model::FEModel)
         empty!(tmp_s)
         empty!(idx_cols)
 
-        @views inrange!(idx_cols, model.balltree, centers[:, i], radius)
+        @views inrange!(idx_cols, tree, centers[:, i], radius)
         for j in idx_cols
             dist = @views norm(centers[:, i] - centers[:, j])
             push!(iH, i)

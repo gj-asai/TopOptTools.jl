@@ -48,7 +48,7 @@ function geometry_projection(volfrac; filename)
 
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
-    f = compute_force_vector(loads, model)
+    f = compute_rhs(loads, model)
 
     # initial end points of the bars
     points = [
