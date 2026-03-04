@@ -119,18 +119,14 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
     # initialize MMA
     m, n = 2, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
-    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.45)
-    xold1, xold2 = similar(x), similar(x)
+    mma = MMAWorkspace(m, n, xmin, xmax, a0mma, amma, cmma, dmma, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.45)
 
     beta = 1
     eta = 0.5
     @info "Starting optimization with beta = $(beta) and p = $(mat_interp.penal)"
     try
         maxiter = 1200
-        continuation_iter = 0
         for loop in 1:maxiter
-            continuation_iter += 1
-
             @timeit "filter and project" begin
                 xTilde .= x
 
@@ -235,26 +231,18 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
             end
 
             # apply continuation
-            if (continuation_iter >= 100 && change < 1e-4) || continuation_iter >= 200
+            if (mma.iter >= 100 && change < 1e-4) || mma.iter >= 200
                 # if at max beta, stop the optimization
                 beta == 64 && break
                 # else, increase beta and p, decrease gamma
                 beta *= 2
                 mat_interp.penal = min(3.0, mat_interp.penal + 1.0)
                 @info "Updated beta to $(beta) and p to $(mat_interp.penal)"
-                continuation_iter = 0
+                restart!(mma)
             end
 
             # MMA update
-            @timeit "mma update" begin
-                xnew = mma_update!(mma, continuation_iter,
-                    x, xmin, xmax, xold1, xold2,
-                    CO2 / CO2_ini, dCO2dx / CO2_ini, g, dgdx,
-                )
-                xold2 .= xold1
-                xold1 .= x
-                x .= xnew
-            end
+            @timeit "mma update" x .= mma_update!(mma, x, dCO2dx / CO2_ini, g, dgdx)
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"

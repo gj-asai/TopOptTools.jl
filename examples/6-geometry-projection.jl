@@ -92,8 +92,7 @@ function geometry_projection(volfrac; filename)
     # initialize mma
     m, n = 1, length(z)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
-    zold1, zold2 = similar(z), similar(z)
-    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma; move=0.01)
+    mma = MMAWorkspace(m, n, zmin, zmax, a0mma, amma, cmma, dmma; move=0.01)
 
     # geometry projection parameters
     ρmin = 1e-2
@@ -231,7 +230,7 @@ function geometry_projection(volfrac; filename)
                 dgdz = vec(dgddensv' * ddensvdz)
             end
 
-            change = norm(z - zold1, Inf)
+            change = norm(z - mma.zold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | cons = %7.4f | Δz = %8.2e " loop - 1 c g[1] change
 
             # update history
@@ -250,16 +249,7 @@ function geometry_projection(volfrac; filename)
 
             change < 1e-3 && break
 
-            # MMA update
-            @timeit "mma update" begin
-                znew = mma_update!(mma, loop,
-                    z, zmin, zmax, zold1, zold2,
-                    c, dcdz, g, dgdz'
-                )
-                zold2 .= zold1
-                zold1 .= z
-                z .= znew
-            end
+            @timeit "mma update" z .= mma_update!(mma, z, dcdz, g, dgdz')
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"

@@ -71,8 +71,7 @@ function simp(volfrac, rρ)
     # initialize MMA
     m, n = 1, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
-    xold1, xold2 = similar(x), similar(x)
-    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma)
+    mma = MMAWorkspace(m, n, xmin, xmax, a0mma, amma, cmma, dmma)
 
     @info "Starting optimization"
     try
@@ -110,7 +109,7 @@ function simp(volfrac, rρ)
             end
 
             # log and plot
-            change = norm(x - xold1, Inf)
+            change = norm(x - mma.xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | change = %8.2e" (loop - 1) c change
             empty!(ax)
             FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
@@ -118,15 +117,7 @@ function simp(volfrac, rρ)
             # Stopping criterion: max change in the design variables
             change < 0.1 && break
 
-            # MMA update
-            @timeit "mma update" begin
-                xnew = mma_update!(mma, loop,
-                    x, xmin, xmax, xold1, xold2,
-                    c, dcdx, g, dgdx)
-                xold2 .= xold1
-                xold1 .= x
-                x .= xnew
-            end
+            @timeit "mma update" x .= mma_update!(mma, x, dcdx, g, dgdx)
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"

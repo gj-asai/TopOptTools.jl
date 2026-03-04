@@ -83,8 +83,7 @@ function infill(vol_local, rρ, rlocal; filename)
     # initialize MMA
     m, n = 1, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
-    xold1, xold2 = similar(x), similar(x)
-    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma, asyinit=0.5, asyincr=1.07, asydecr=0.65, move=0.01)
+    mma = MMAWorkspace(m, n, xmin, xmax, a0mma, amma, cmma, dmma, asyinit=0.5, asyincr=1.07, asydecr=0.65, move=0.01)
 
     beta = 1.0
     eta = 0.5
@@ -94,10 +93,7 @@ function infill(vol_local, rρ, rlocal; filename)
     @info "Starting optimization with beta = $beta, penal = $(mat_interp.penal)"
     try
         maxiter = 600
-        loopbeta = 0
         for loop in 1:maxiter+1
-            loopbeta += 1
-
             @timeit "filter and project" begin
                 xTilde .= x
                 TopOptTools.filter!(xTilde, density_filter)
@@ -141,7 +137,7 @@ function infill(vol_local, rρ, rlocal; filename)
             end
 
             # log
-            change = norm(x - xold1, Inf)
+            change = norm(x - mma.xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | vol = %5.3f | cons = %8.4f" (loop - 1) c xPhys ⋅ model.elemvol / sum(model.elemvol) g[1]
 
             # Update history
@@ -161,26 +157,19 @@ function infill(vol_local, rρ, rlocal; filename)
             end
 
             # Continuation on beta and penal
-            if beta < 100 && (loopbeta >= 40 || change < 1e-3)
+            if beta < 100 && (mma.iter >= 40 || change < 1e-3)
+                restart!(mma)
                 beta *= 2
-                loopbeta = 0
                 mat_interp.penal = min(3.0, mat_interp.penal + 0.5)
                 @info "Updated beta to $(beta) and penal to $(mat_interp.penal)"
             end
 
             # MMA update
-            @timeit "mma update" begin
-                xnew = mma_update!(mma, loopbeta,
-                    x, xmin, xmax, xold1, xold2,
-                    c, dcdx, g, dgdx')
-                xold2 .= xold1
-                xold1 .= x
-                x .= xnew
-            end
+            @timeit "mma update" x .= mma_update!(mma, x, dcdx, g, dgdx')
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"
-        rethrow()
+        # rethrow()
     finally
         @timeit "export" begin
             # history

@@ -89,8 +89,7 @@ function thermal_actuator(volfrac, rρ; filename)
     # initialize MMA
     m, n = 1, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
-    xold1, xold2 = similar(x), similar(x)
-    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma, move=0.05)
+    mma = MMAWorkspace(m, n, xmin, xmax, a0mma, amma, cmma, dmma, move=0.05)
 
     @info "Starting optimization"
     try
@@ -155,16 +154,7 @@ function thermal_actuator(volfrac, rρ; filename)
             # Stopping criterion: max change in the objecvtive function
             change < 1e-3 && break
 
-            # MMA update
-            @timeit "mma update" begin
-                xnew = mma_update!(mma, loop,
-                    x, xmin, xmax, xold1, xold2,
-                    u_out, dudx, g, dgdx
-                )
-                xold2 .= xold1
-                xold1 .= x
-                x .= xnew
-            end
+            @timeit "mma update" x .= mma_update!(mma, x, dudx, g, dgdx)
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"

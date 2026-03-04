@@ -17,7 +17,7 @@ export MaterialInterpolation
 export FEModel
 export FESolver, fea!, adjoint_sensitivities!, update_stiffness!
 export NodalLoad, LinearLoad, EigenstrainLoad, compute_rhs, compute_rhs!
-export MMAWorkspace, mma_update!
+export MMAWorkspace, mma_update!, restart!
 export ConvolutionFilter, PDEFilter, filter!
 export project_heaviside!, project_heaviside_derivative!
 

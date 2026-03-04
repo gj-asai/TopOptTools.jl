@@ -97,8 +97,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
     # initialize MMA
     m, n = 1, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
-    xold1, xold2 = similar(x), similar(x)
-    mma = MMAWorkspace(m, n, a0mma, amma, cmma, dmma, asyinit=0.2, asyincr=1.2, asydecr=0.7, move=0.2)
+    mma = MMAWorkspace(m, n, xmin, xmax, a0mma, amma, cmma, dmma, asyinit=0.2, asyincr=1.2, asydecr=0.7, move=0.2)
 
     @info "Starting optimization with p = $(mat_interp.penal)"
     try
@@ -178,15 +177,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
                 @info "Updated p to $(mat_interp.penal)"
             end
 
-            # MMA update
-            @timeit "mma update" begin
-                xnew = mma_update!(mma, loop,
-                    x, xmin, xmax, xold1, xold2,
-                    c, dcdx, g, dgdx)
-                xold2 .= xold1
-                xold1 .= x
-                x .= xnew
-            end
+            @timeit "mma update" x .= mma_update!(mma, x, dcdx, g, dgdx)
         end
     catch e
         @warn "Computation interrupted - $(typeof(e))"
