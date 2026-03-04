@@ -4,11 +4,11 @@ E. Andreassen, A. Clausen, M. Schevenels, B. S. Lazarov and O. Sigmund
 Efficient topology optimization in MATLAB using 88 lines of code
 Structural and Multidisciplinary Optimization (2011)
 """
-# INFO: plotting contains some workarounds because FerriteViz does not support Ferrite v1.0
 
 using Ferrite, FerriteGmsh
 using TimerOutputs, Printf, GLMakie
 using TopOptTools
+import FerriteViz
 
 # defining a power law MaterialInterpolation with 1 design variable per element
 struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
@@ -25,13 +25,14 @@ function simp(volfrac, rρ)
     grid = redirect_stdout(() -> togrid(mesh_file), devnull) # suppress print from the Gmsh.jl call inside togrid
     @info "Done reading $(mesh_file): $(getnnodes(grid)) nodes, $(getncells(grid)) elements"
 
-    # loads and BCs
+    # physical sets not defined in the mesh file
     xmax = maximum([n.x[1] for n in getnodes(grid)])
     ymax = maximum([n.x[2] for n in getnodes(grid)])
     addfacetset!(grid, "symmetry", x -> x[1] ≈ 0.0) # left edge
     addnodeset!(grid, "support", x -> x[1] ≈ xmax && x[2] ≈ 0.0) # bottom right corner
     addnodeset!(grid, "force", x -> x[1] ≈ 0.0 && x[2] ≈ ymax) # top left corner
 
+    # loads and BCs
     constraints = [
         Dirichlet(:u, getfacetset(grid, "symmetry"), (x, t) -> 0.0, [1]), # block x displacement
         Dirichlet(:u, getnodeset(grid, "support"), (x, t) -> 0.0, [2]), # block y displacement
@@ -51,7 +52,6 @@ function simp(volfrac, rρ)
     # FE model
     model = FEModel(; grid, ip, qr, mat_interp, constraints)
     f = compute_rhs(loads, model)
-    nelx, nely = [xmax, ymax] / sqrt(model.elemvol[1]) .|> round .|> Int # assuming identical square elements
 
     # initialize design variables
     x = fill(volfrac, getncells(grid))
@@ -77,7 +77,12 @@ function simp(volfrac, rρ)
     @info "Starting optimization"
     try
         # plot initial design
-        display(image(reshape(-x, nely, nelx)', interpolate=false, axis=(aspect=DataAspect(), yreversed=true, xreversed=true)))
+        fig = Figure()
+        ax = Axis(fig[1, 1], aspect=DataAspect(), xautolimitmargin=(0, 0), yautolimitmargin=(0, 0))
+
+        plotter = FerriteViz.MakiePlotter(model.dh, fesolver.solution)
+        FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
+        display(fig)
 
         maxiter = 500
         for loop in 1:maxiter+1
@@ -107,8 +112,8 @@ function simp(volfrac, rρ)
             # log and plot
             change = norm(x - xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | change = %8.2e" (loop - 1) c change
-            empty!(current_axis())
-            image!(reshape(-x, nely, nelx)', interpolate=false)
+            empty!(ax)
+            FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
 
             # Stopping criterion: max change in the design variables
             change < 0.1 && break
