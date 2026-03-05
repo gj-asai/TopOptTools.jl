@@ -63,9 +63,9 @@ end
 """
     mma_update!(workspace, x, dobjdx, cons, dconsdx)
 
-Returns the updated value of the design variables
+Returns the updated value of the design variables, solving the MMA subproblem with a dual method.
 
-The subproblem is solved using a dual method
+`x` must have size `(n,)`, `dobjdx` must have size `(n,)`, `cons` must have size `(m,)`, and `dconsdx` must have size `(m, n)`
 """
 function mma_update!(workspace, x, dobjdx, cons, dconsdx)
     @unpack a0, a, c, d, asyinit, asyincr, asydecr, move, m, n, iter = workspace

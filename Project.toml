@@ -1,7 +1,7 @@
 name = "TopOptTools"
 uuid = "d486209d-77d0-459c-90e8-0e65762702e0"
 authors = ["Gustavo Asai"]
-version = "0.6.0"
+version = "0.7.0"
 
 [deps]
 Ferrite = "c061ca5d-56c9-439f-9c0e-210fe06d3992"

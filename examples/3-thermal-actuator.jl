@@ -6,8 +6,9 @@ Computer Methods in Applied Mechanics and Engineering (2000)
 """
 
 using Ferrite, FerriteGmsh
-using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
+using TimerOutputs, Printf, GLMakie
 using TopOptTools
+import FerriteViz
 
 # defining a power law MaterialInterpolation with 1 design variable per element
 struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
@@ -16,9 +17,8 @@ struct SIMP{dim,T<:Real,CT} <: MaterialInterpolation{1,T}
 end
 TopOptTools.interpolate(xe::AbstractVector, simp::SIMP) = xe[1]^simp.penal * simp.mat.C
 
-function thermal_actuator(volfrac, rρ; filename)
+function thermal_actuator(volfrac, rρ)
     reset_timer!()
-    pvd = paraview_collection(filename)
 
     # read mesh
     mesh_file = "examples/models/mbb.msh" # this example contains a rectangular mesh
@@ -93,6 +93,14 @@ function thermal_actuator(volfrac, rρ; filename)
 
     @info "Starting optimization"
     try
+        # plot initial design
+        fig = Figure()
+        ax = Axis(fig[1, 1], aspect=DataAspect(), xautolimitmargin=(0, 0), yautolimitmargin=(0, 0))
+
+        plotter = FerriteViz.MakiePlotter(model.dh, fesolver.solution)
+        FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
+        display(fig)
+
         maxiter = 500
         for loop in 1:maxiter+1
             @timeit "assemble stiffness" begin
@@ -135,21 +143,15 @@ function thermal_actuator(volfrac, rρ; filename)
             else
                 Inf
             end
+
+            # log and plot
             @info @sprintf "It = %4d | u_out = %7.4f | change = %8.2e" (loop - 1) -u_out change
+            empty!(ax)
+            FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
 
             # Update history
             push!(history[:objective], u_out)
             push!(history[:constraint], g)
-
-            # Save iteration
-            @timeit "export" begin
-                filename_i = @sprintf "%s.%4.4d.vtu" filename (loop - 1)
-                VTKGridFile(filename_i, grid) do vtk
-                    @views write_cell_data(vtk, x, "density")
-                    write_solution(vtk, model.dh, u)
-                    pvd[loop] = vtk
-                end
-            end
 
             # Stopping criterion: max change in the objecvtive function
             change < 1e-3 && break
@@ -160,23 +162,6 @@ function thermal_actuator(volfrac, rρ; filename)
         @warn "Computation interrupted - $(typeof(e))"
         # rethrow()
     finally
-        @timeit "export" begin
-            # history
-            h5open(filename * ".h5", "w") do file
-                write(file, "objective", history[:objective])
-                write(file, "constraint", reduce(hcat, history[:constraint]))
-            end
-            @info "Saved file $(filename).h5"
-
-            # final design
-            save("$(filename).design.jld2", "x", x)
-            @info "Saved file $(filename).design.jld2"
-
-            # paraview .pvd
-            vtk_save(pvd)
-            @info "Saved file $(filename).pvd"
-        end
-
         print_timer()
     end
 end

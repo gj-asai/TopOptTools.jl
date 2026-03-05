@@ -21,12 +21,9 @@ To add this package as a dependency to your project, run `]add https://gitlab.tu
 
 To run the examples, start Julia from the root directory with `julia --project=examples/ -t auto` and `include` the file of the example you want to run. Some reasonable parameters that can be tested in each example:
 1. `simp(0.5, 0.5)`
-2. `paraview(0.5, 0.5, filename="path/to/results")`
-3. `infill(0.4, 0.2, 1.0, filename="path/to/results")`
-4. `bracket(0.2, 5.0, 7.0, filename="path/to/results")`
-5. `mm_ecotopopt(350, 0.5, 0.5, 0.5, filename="path/to/results")`
-6. `geometry_projection(0.5, filename="path/to/results")`
-7. `thermal_actuator(0.5, 0.5, filename="path/to/results")`
+2. `bracket(0.2, 5.0, 7.0, filename="path/to/results")`
+3. `thermal_actuator(0.3, 0.5)`
+4. `mm_ecotopopt(350, 0.5, 0.5, 0.5)`
 
 > [!TIP]
 > If `filename` is set to `"results/mbb"`, the script will create the files:

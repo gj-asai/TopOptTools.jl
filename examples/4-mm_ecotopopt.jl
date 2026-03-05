@@ -3,8 +3,9 @@ Multi-material topology optimization for ecoefficiency
 """
 
 using Ferrite, FerriteGmsh
-using TimerOutputs, Printf, WriteVTK, HDF5, JLD2
+using TimerOutputs, Printf, GLMakie
 using TopOptTools
+import FerriteViz
 
 mutable struct MMSOMP{dim,M,N,T<:Real,CT} <: MaterialInterpolation{N,T}
     mat::Vector{Material{dim,T,CT}}
@@ -30,9 +31,8 @@ function TopOptTools.interpolate(xe::AbstractVector{T}, interp::MMSOMP{2}) where
     return result
 end
 
-function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
+function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
     reset_timer!()
-    pvd = paraview_collection(filename)
 
     # read mesh
     mesh_file = "examples/models/mbb.msh" # this example contains a rectangular mesh
@@ -108,23 +108,31 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
         mat_interp.mat[1].CO2 * mat_interp.mat[1].ρ * xPhys[1:3:end] ⋅ model.elemvol +
         mat_interp.mat[2].CO2 * mat_interp.mat[2].ρ * xPhys[2:3:end] ⋅ model.elemvol
 
-    history = Dict(
-        :beta => Float64[],
-        :penal => Float64[],
-        :objective => Float64[],
-        :constraint => Vector{Float64}[],
-        :volfracs => Vector{Float64}[],
-    )
+    # history of the objective
+    history = Float64[]
 
     # initialize MMA
     m, n = 2, length(x)
     a0mma, amma, cmma, dmma = 1.0, zeros(m), fill(1000.0, m), zeros(m)
-    mma = MMAWorkspace(m, n, xmin, xmax, a0mma, amma, cmma, dmma, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.45)
+    mma = MMAWorkspace(m, n, xmin, xmax, a0mma, amma, cmma, dmma, asyinit=0.1, asyincr=1.1, asydecr=0.6, move=0.5)
 
     beta = 1
     eta = 0.5
     @info "Starting optimization with beta = $(beta) and p = $(mat_interp.penal)"
     try
+        # plot initial design
+        fig = Figure()
+        ax = Axis(fig[1, 1], aspect=DataAspect(), xautolimitmargin=(0, 0), yautolimitmargin=(0, 0), xgridvisible=false, ygridvisible=false)
+
+        # colormaps with transparency for eadch material
+        cmap1 = GLMakie.Colors.alphacolor.(resample_cmap(:Blues, 11), 0.0:0.1:1.0)
+        cmap2 = GLMakie.Colors.alphacolor.(resample_cmap(:Reds, 11), 0.0:0.1:1.0)
+
+        plotter = FerriteViz.MakiePlotter(model.dh, fesolver.solution)
+        FerriteViz.cellplot!(ax, plotter, xPhys[1:3:end], colormap=cmap1)
+        FerriteViz.cellplot!(ax, plotter, xPhys[2:3:end], colormap=cmap2)
+        display(fig)
+
         maxiter = 1200
         for loop in 1:maxiter
             @timeit "filter and project" begin
@@ -198,37 +206,22 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
 
             # Stopping criterion: relative change in the objective function
             change = if loop > 1
-                abs(CO2 - history[:objective][end]) / history[:objective][end]
+                abs(CO2 - history[end]) / history[end]
             else
                 Inf
             end
+            push!(history, CO2)
 
-            # log
+            # log and plot
             volfracs = [
                 xPhys[1:3:end] ⋅ model.elemvol / sum(model.elemvol),
                 xPhys[2:3:end] ⋅ model.elemvol / sum(model.elemvol),
             ]
             formatted_volfracs = join([@sprintf("%5.2f", 100 * f) for f in volfracs], ", ")
             @info @sprintf "It = %4d | CO2 = %8.4f | change = %8.2e | c = %9.4f | volfracs = [%s] %%" loop CO2 change c formatted_volfracs
-
-            # update history
-            push!(history[:beta], beta)
-            push!(history[:penal], mat_interp.penal)
-            push!(history[:objective], CO2)
-            push!(history[:constraint], g)
-            push!(history[:volfracs], volfracs)
-
-            # export iteration file
-            !isnothing(filename) && @timeit "export" begin
-                filename_i = @sprintf "%s.%4.4d.vtu" filename (loop - 1)
-                VTKGridFile(filename_i, grid) do vtk
-                    write_cell_data(vtk, xPhys[1:3:end], "density1")
-                    write_cell_data(vtk, xPhys[2:3:end], "density2")
-                    write_cell_data(vtk, xPhys[3:3:end], "theta")
-                    write_solution(vtk, model.dh, fesolver.solution)
-                    pvd[loop] = vtk
-                end
-            end
+            empty!(ax)
+            FerriteViz.cellplot!(ax, plotter, xPhys[1:3:end], colormap=cmap1)
+            FerriteViz.cellplot!(ax, plotter, xPhys[2:3:end], colormap=cmap2)
 
             # apply continuation
             if (mma.iter >= 100 && change < 1e-4) || mma.iter >= 200
@@ -248,26 +241,6 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0; filename)
         @warn "Computation interrupted - $(typeof(e))"
         # rethrow()
     finally
-        !isnothing(filename) && @timeit "export" begin
-            # history
-            h5open(filename * ".h5", "w") do file
-                write(file, "beta", history[:beta])
-                write(file, "penal", history[:penal])
-                write(file, "objective", history[:objective])
-                write(file, "constraint", reduce(hcat, history[:constraint]))
-                write(file, "volfracs", reduce(hcat, history[:volfracs]))
-            end
-            @info "Saved file $(filename).h5"
-
-            # final design
-            save("$(filename).design.jld2", "xPhys", xPhys)
-            @info "Saved file $(filename).design.jld2"
-
-            # paraview .pvd
-            vtk_save(pvd)
-            @info "Saved file $(filename).pvd"
-        end
-
         print_timer(title="angle=$(angle)")
     end
 end
