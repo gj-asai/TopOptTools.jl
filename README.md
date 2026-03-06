@@ -19,25 +19,35 @@ MMA subproblems are solved with [`Optim.jl`](https://github.com/JuliaNLSolvers/O
 ## Installation
 To add this package as a dependency to your project, run `]add https://gitlab.tudelft.nl/shapingmatterlab/TopOptTools.jl.git`.
 
-To run the examples, start Julia from the root directory with `julia --project=examples/ -t auto` and `include` the file of the example you want to run. Some reasonable parameters that can be tested in each example:
+To run the examples, start Julia from the root directory with:
+```console
+// sync environment from examples/Manifest.toml
+$ julia --project=examples/ -e "using Pkg; Pkg.instantiate()"
+
+$ julia --project=examples/ -t auto
+julia> include("examples/1-simp.jl")
+julia> simp(0.5, 0.5)
+```
+
+Some reasonable parameters that can be tested in each example:
 1. `simp(0.5, 0.5)`
 2. `bracket(0.2, 5.0, 7.0, filename="path/to/results")`
 3. `thermal_actuator(0.3, 0.5)`
 4. `mm_ecotopopt(350, 0.5, 0.5, 0.5)`
 
 > [!TIP]
-> If `filename` is set to `"results/mbb"`, the script will create the files:
-> - `results/mbb.xxxx.vtu`: VTK Unstructured Grid File for each iteration
-> - `results/mbb.pvd`: Paraview Data File to visualize all iterations as a time series
-> - `results/mbb.h5`: HDF5 file containing the convergence history. Data is flattened to be compatible with other HDF5 readers
-> - `results/mbb.design.jld2`: JLD2 file containing the design variables at the final iteration. It is HDF5-compatible but best suited for post-processing by Julia code
+> If `filename` is set to `"results/bracket"`, the script will create the files:
+> - `results/bracket.xxxx.vtu`: VTK Unstructured Grid File for each iteration
+> - `results/bracket.pvd`: Paraview Data File to visualize all iterations as a time series
+> - `results/bracket.h5`: HDF5 file containing the convergence history. Data is flattened to be compatible with other HDF5 readers
+> - `results/bracket.design.jld2`: JLD2 file containing the design variables at the final iteration. It is HDF5-compatible but best suited for post-processing by Julia code
 >
 > The full path to the parent directory (`results/` in this case) must already exist, and existing files in it may be overwritten
 
 ## Structure
 In this repository you can find:
 - `src/`: source code for the module `TopOptTools`
-- `examples/`: collection of scripts showing the usage of the package for different optimization formulations. The directory contains its own `Project.toml` defining an environment to run the scripts
+- `examples/`: collection of scripts showing the usage of the package for different optimization formulations. The directory contains its own `Project.toml` and `Manifest.toml` defining an environment to run the scripts
   - `examples/models/`: `.geo` and `.msh` [Gmsh](https://gmsh.info/) files. The meshes are imported to the scripts using [`FerriteGmsh.jl`](https://github.com/Ferrite-FEM/FerriteGmsh.jl)
 
 ## Author(s)
@@ -53,4 +63,4 @@ Copyright notice:
 Technische Universiteit Delft hereby disclaims all copyright interest in the program "TopOptTools.jl". It is a Julia package with tools for density-based topology optimization scripts.
 Henri Werij, Faculty of Aerospace Engineering, Technische Universiteit Delft.
 
-&copy; 2025, G.J. Asai
+&copy; 2026, G.J. Asai
