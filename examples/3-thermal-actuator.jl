@@ -65,7 +65,7 @@ function thermal_actuator(volfrac, rρ)
     dgdx = zeros(1, getncells(grid))
 
     # initialize FE solver
-    fesolver = FESolver(model)
+    fesolver = LinearElasticity(model)
     f = zeros(ndofs(model.dh))
     ∂f∂x = zeros(ndofs(model.dh), length(x))
 

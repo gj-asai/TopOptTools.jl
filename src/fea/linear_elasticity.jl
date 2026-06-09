@@ -26,7 +26,7 @@ end
 """
 Contains the data necessary for the linear system solve and stores the results
 """
-struct FESolver{FEM<:FEModel,SS<:StiffnessScratch}
+struct LinearElasticity{FEM<:FEModel,SS<:StiffnessScratch}
     model::FEM
     ps::MKLPardisoSolver
 
@@ -38,11 +38,11 @@ struct FESolver{FEM<:FEModel,SS<:StiffnessScratch}
 end
 
 """
-    FESolver(model::FEModel)
+    LinearElasticity(model::FEModel)
 
-Creates a new `FESolver` with uninitialized design variables
+Creates a new `LinearElasticity` with uninitialized design variables
 """
-function FESolver(model::FEModel)
+function LinearElasticity(model::FEModel)
     ps = MKLPardisoSolver()
     set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
     set_iparm!(ps, 1, 1) # to be able to manually set iparm
@@ -64,16 +64,16 @@ function FESolver(model::FEModel)
         put!(chnl, StiffnessScratch(model, asm))
     end
 
-    return FESolver(model, ps, x0, K, ∂Ke∂x, solution, chnl)
+    return LinearElasticity(model, ps, x0, K, ∂Ke∂x, solution, chnl)
 end
 
 """
-    fea!(solver::FESolver, f::AbstractVector)
+    solve!(solver::LinearElasticity, f::AbstractVector)
 
 Solves the finite element problem with the stiffness matrix stored in `solver` and right hand side `f`.
 Stores the result in `solver.solution`
 """
-function fea!(solver::FESolver, f::AbstractVector)
+function solve!(solver::LinearElasticity, f::AbstractVector)
     @unpack K, solution, ps = solver
 
     # solve linear system and store result in solver.solution
@@ -89,7 +89,7 @@ Uses the adjoint system to compute the sensitivities ∂J/∂x of a function J(u
 `lambda` is the vector of adjoint variables, obtained from calling `fea!` with right hand side dJ/du.
 `displacements` is the vector of nodal displacements, obtained from calling `fea!` with right hand side equal to the forces vector
 """
-function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FESolver)
+function adjoint_sensitivities!(dJdx, lambda, displacements, solver::LinearElasticity)
     model = solver.model
     ∂Ke∂x = solver.∂Ke∂x
     for cell in CellIterator(model.dh)
@@ -105,12 +105,12 @@ function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FESolver)
 end
 
 """
-    update_stiffness!(solver::FESolver, x::AbstractVector)
+    update_stiffness!(solver::LinearElasticity, x::AbstractVector)
 
 Recomputes the stiffness matrix, using the new design variables `x`.
 Needed to update the stiffness matrix before calling `fea!` and `adjoint_sensitivities!`
 """
-function update_stiffness!(solver::FESolver, x::AbstractVector)
+function update_stiffness!(solver::LinearElasticity, x::AbstractVector)
     solver.x .= x
 
     @unpack ps, x, K, ∂Ke∂x, chnl = solver

@@ -79,7 +79,7 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
     end
 
     # initialize FE solver
-    fesolver = FESolver(model)
+    fesolver = LinearElasticity(model)
 
     @timeit "build filters" begin
         @info "Building sensitivity filter with radius $rρ"
