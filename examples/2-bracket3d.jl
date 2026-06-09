@@ -110,10 +110,10 @@ function bracket(volfrac, rρ, rθ, angle=0; filename)
 
             @timeit "assemble stiffness" update_stiffness!(fesolver, x)
             @timeit "linear solve" begin
-                fea!(fesolver, f1)
+                solve!(fesolver, f1)
                 u1 = copy(fesolver.solution)
 
-                fea!(fesolver, f2)
+                solve!(fesolver, f2)
                 u2 = copy(fesolver.solution)
             end
 

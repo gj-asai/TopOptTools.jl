@@ -109,7 +109,7 @@ function thermal_actuator(volfrac, rρ)
             end
 
             @timeit "assemble load vector" compute_rhs!(f, ∂f∂x, loads, model, x)
-            @timeit "linear solve" fea!(fesolver, f)
+            @timeit "linear solve" solve!(fesolver, f)
 
             @timeit "evaluate functions" begin
                 # Objective: compliance
@@ -122,7 +122,7 @@ function thermal_actuator(volfrac, rρ)
 
             @timeit "sensitivity analysis" begin
                 # adjoint analysis
-                fea!(fesolver, L)
+                solve!(fesolver, L)
                 lambda = fesolver.solution
                 adjoint_sensitivities!(dudx, lambda, u, fesolver)
                 for cell in CellIterator(model.dh)

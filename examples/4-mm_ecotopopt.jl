@@ -148,7 +148,7 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
             end
 
             @timeit "assemble stiffness" update_stiffness!(fesolver, xPhys)
-            @timeit "linear solve" fea!(fesolver, f)
+            @timeit "linear solve" solve!(fesolver, f)
 
             @timeit "evaluate functions" begin
                 # Objective: CO2 impact

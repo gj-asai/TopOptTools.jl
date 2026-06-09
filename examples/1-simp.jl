@@ -86,7 +86,7 @@ function simp(volfrac, rρ)
         maxiter = 500
         for loop in 1:maxiter+1
             @timeit "assemble stiffness" update_stiffness!(fesolver, x)
-            @timeit "linear solve" fea!(fesolver, f)
+            @timeit "linear solve" solve!(fesolver, f)
 
             @timeit "evaluate functions" begin
                 # Objective: compliance
