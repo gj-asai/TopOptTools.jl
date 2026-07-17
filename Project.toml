@@ -15,13 +15,3 @@ Pardiso = "46dd5b70-b6fb-5a00-ae2d-e8fea33afaf2"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Tensors = "48a634ad-e948-5137-8d70-aa71f2a747f4"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
-
-[compat]
-Ferrite = "1"
-MKL = "0.9"
-NearestNeighbors = "0.4.21"
-OhMyThreads = "0.8.3"
-Optim = "2"
-Pardiso = "1.0.1"
-Tensors = "1.16.2"
-UnPack = "1.0.2"
