@@ -1,7 +1,7 @@
 # TopOpt Tools in Julia
 This package provides tools for Finite Element Analysis, variable updating via the Method of Moving Asymptotes and filtering.
 They implement an abstraction layer to functionality commonly used in density-based topology optimization scripts.
-Check the exported members of module `TopOptTools` for an overview of the available tools.
+Check the exported members of module [`TopOptTools`](src/TopOptTools.jl) for an overview of the available tools.
 
 Mechanical (linear elasticity) analysis and PDE filter use [`Ferrite.jl`](https://github.com/Ferrite-FEM/Ferrite.jl) finite element toolbox.
 Derivatives of the stiffness matrix with respect to the element variables are computed via automatic differentiation - [`ForwardDiff.jl`](https://github.com/JuliaDiff/ForwardDiff.jl).
