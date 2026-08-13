@@ -7,8 +7,7 @@ Mechanical (linear elasticity) analysis and PDE filter use [`Ferrite.jl`](https:
 Derivatives of the stiffness matrix with respect to the element variables are computed via automatic differentiation - [`ForwardDiff.jl`](https://github.com/JuliaDiff/ForwardDiff.jl).
 The linear systems are solved using MKL Pardiso's sparse direct solver via [`Pardiso.jl`](https://github.com/JuliaSparse/Pardiso.jl), reusing symbolic and numerical factorizations when possible.
 
-Parallelization is done via multithreading, which enables some level of scalability on the problem size without many changes in the structure of the program and of the data.
-Task scheduling during multithreaded finite element matrices assembly is handled using [`OhMyThreads.jl`](https://github.com/JuliaFolds2/OhMyThreads.jl) and uses all threads started with Julia.
+Parallelization is done via multithreading, which enables some level of scalability on the problem size without many changes in the structure of the program and of the data. It uses all threads started with Julia.
 The linear solver is kept at its default configuration, which uses half of the available threads.
 
 MMA subproblems are solved with [`Optim.jl`](https://github.com/JuliaNLSolvers/Optim.jl). The dual problem is solved with the default configuration for box constrained optimizations: Fminbox (a barrier method) with L-BGFS as line search algorithm.

@@ -120,7 +120,7 @@ function update_stiffness!(solver::LinearElasticity, x::AbstractVector)
     nvar = get_nvar(model)
 
     start_assemble(K) # zero K out before starting
-    @tasks for e in 1:getncells(model.grid)
+    Threads.@threads for e in 1:getncells(model.grid)
         scratch = take!(chnl)
         @unpack cell_cache, cellvalues, Ke, jac, cfg, assembler = scratch
 

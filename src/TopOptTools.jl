@@ -9,7 +9,6 @@ using Pardiso,
     SparseArrays,
     ForwardDiff,
     NearestNeighbors,
-    OhMyThreads,
     UnPack
 
 export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D

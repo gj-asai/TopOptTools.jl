@@ -66,7 +66,7 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
 
     n_basefuncs = getnbasefunctions(cv)
     start_assemble(Kf)
-    @tasks for e in 1:getncells(model.grid)
+    Threads.@threads for e in 1:getncells(model.grid)
         scratch = take!(chnl)
         @unpack cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, assembler = scratch
 
