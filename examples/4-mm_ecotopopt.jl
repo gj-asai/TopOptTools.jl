@@ -64,7 +64,7 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
     qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
 
     # FE model
-    model = FEModel(; grid, ip, qr, mat_interp, constraints)
+    model = FEModel(; grid, ip, qr, constraints)
     f = compute_rhs(loads, model)
 
     # initialize design variables
@@ -94,7 +94,7 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
     dgdx = zeros(2, 3 * getncells(grid))
 
     # initialize linear solver
-    fesolver = LinearElasticity(model)
+    fesolver = LinearElasticity(model, mat_interp)
 
     @timeit "build filters" begin
         @info "Building sensitivity filter with radius $rρ"

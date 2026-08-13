@@ -50,7 +50,7 @@ function simp(volfrac, rρ)
     qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
 
     # FE model
-    model = FEModel(; grid, ip, qr, mat_interp, constraints)
+    model = FEModel(; grid, ip, qr, constraints)
     f = compute_rhs(loads, model)
 
     # initialize design variables
@@ -61,7 +61,7 @@ function simp(volfrac, rρ)
     dgdx = zeros(1, getncells(grid))
 
     # initialize FE solver
-    fesolver = LinearElasticity(model)
+    fesolver = LinearElasticity(model, mat_interp)
 
     @timeit "build filters" begin
         @info "Building sensitivity filter with radius $rρ"
@@ -105,7 +105,7 @@ function simp(volfrac, rρ)
                 dgdx .= model.elemvol' / sum(model.elemvol) / volfrac
 
                 # sensitivity filtering
-                TopOptTools.filter!(dcdx, x, density_filter)
+                @timeit "filter" TopOptTools.filter!(dcdx, x, density_filter)
             end
 
             # log and plot

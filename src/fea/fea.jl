@@ -1,7 +1,8 @@
 """
 Contains the data necessary for the linear system solve and stores the results. Different physics are implementations of `FEA`.
+`nvar` is the number of design variables per element.
 """
-abstract type FEA end
+abstract type FEA{nvar} end
 
 """
 Contains the task local data for parallel stiffness assemble
@@ -14,7 +15,7 @@ struct StiffnessScratch{CC<:CellCache,CV<:CellValues,JCFG<:ForwardDiff.JacobianC
     cfg::JCFG
     assembler::A
 end
-function StiffnessScratch(model::FEModel{dim,nvar}, asm::Ferrite.AbstractAssembler) where {dim,nvar}
+function StiffnessScratch(model::FEModel{dim}, asm::Ferrite.AbstractAssembler, nvar::Int) where {dim}
     cell_cache = CellCache(model.dh)
     cellvalues = copy(model.cellvalues)
     n_basefuncs = getnbasefunctions(cellvalues)
@@ -52,7 +53,7 @@ Uses the adjoint system to compute the sensitivities ∂J/∂x of a function J(u
 `lambda` is the vector of adjoint variables, obtained from calling `fea!` with right hand side dJ/du.
 `displacements` is the vector of nodal displacements, obtained from calling `fea!` with right hand side equal to the forces vector
 """
-function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FEA)
+function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FEA{nvar}) where {nvar}
     model = solver.model
     ∂Ke∂x = solver.∂Ke∂x
     for cell in CellIterator(model.dh)
@@ -60,7 +61,6 @@ function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FEA)
         dofs = celldofs(cell)
 
         @views ue, lambdae = lambda[dofs], displacements[dofs]
-        nvar = get_nvar(model)
         for i in 1:nvar
             dJdx[nvar*(e-1)+i] = -dot(lambdae, ∂Ke∂x[nvar*(e-1)+i], ue)
         end
@@ -73,14 +73,13 @@ end
 Recomputes the stiffness matrix, using the new design variables `x`.
 Needed to update the stiffness matrix before calling `fea!` and `adjoint_sensitivities!`
 """
-function update_stiffness!(solver::FEA, x::AbstractVector)
+function update_stiffness!(solver::FEA{nvar}, x::AbstractVector) where {nvar}
     solver.x .= x
 
     @unpack ps, x, K, ∂Ke∂x, chnl = solver
     model = solver.model
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
-    nvar = get_nvar(model)
 
     start_assemble(K) # zero K out before starting
     Threads.@threads for e in 1:getncells(model.grid)

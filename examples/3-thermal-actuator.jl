@@ -55,7 +55,7 @@ function thermal_actuator(volfrac, rρ)
     qr = QuadratureRule{RefQuadrilateral}(2) # 2 point quadrature
 
     # FE model
-    model = FEModel(; grid, ip, qr, mat_interp, constraints)
+    model = FEModel(; grid, ip, qr, constraints)
 
     # initialize design variables
     x = fill(volfrac, getncells(grid))
@@ -65,7 +65,7 @@ function thermal_actuator(volfrac, rρ)
     dgdx = zeros(1, getncells(grid))
 
     # initialize FE solver
-    fesolver = LinearElasticity(model)
+    fesolver = LinearElasticity(model, mat_interp)
     f = zeros(ndofs(model.dh))
     ∂f∂x = zeros(ndofs(model.dh), length(x))
 

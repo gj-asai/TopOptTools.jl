@@ -1,4 +1,4 @@
-struct LinearElasticity{FEM<:FEModel,MatInterp<:MaterialInterpolation,SS<:StiffnessScratch} <: FEA
+struct LinearElasticity{FEM<:FEModel,nvar,MatInterp<:MaterialInterpolation{nvar},SS<:StiffnessScratch} <: FEA{nvar}
     model::FEM
     ps::MKLPardisoSolver
 
@@ -29,7 +29,7 @@ function LinearElasticity(model::FEModel, mat_interp::MaterialInterpolation{nvar
     chnl = Channel{StiffnessScratch}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
         asm = start_assemble(K; fillzero=false, atomic=true)
-        put!(chnl, StiffnessScratch(model, asm))
+        put!(chnl, StiffnessScratch(model, asm, nvar))
     end
 
     return LinearElasticity(model, ps, x0, mat_interp, K, ∂Ke∂x, solution, chnl)

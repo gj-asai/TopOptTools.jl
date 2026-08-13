@@ -14,7 +14,6 @@ struct FEModel{dim,T<:Real,G<:Grid{dim},CV<:CellValues,FV<:FacetValues,IP<:Inter
     dh::DofHandler{dim,G}
     ch::ConstraintHandler{DofHandler{dim,G},T}
 end
-get_dim(::FEModel{dim}) where {dim} = dim
 
 """
      FEModel(; grid::Grid, ip::Interpolation, qr::QuadratureRule, mat_interp::MaterialInterpolation, constraints::Vector{Dirichlet}) 
