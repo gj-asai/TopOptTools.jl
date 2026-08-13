@@ -22,12 +22,12 @@ export ConvolutionFilter, PDEFilter, filter!
 export project_heaviside!, project_heaviside_derivative!
 
 # Finite element analysis
-include("fea/material.jl")
-include("fea/material_interpolation.jl")
 include("fea/femodel.jl")
 include("fea/fea.jl")
 include("fea/loads.jl")
 
+include("fea/material.jl")
+include("fea/material_interpolation.jl")
 include("fea/linear_elasticity.jl")
 
 # MMA

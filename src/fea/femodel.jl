@@ -1,10 +1,9 @@
 "Struct that holds the geometric, material and boundary conditions data of a finite element model"
-struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{dim},CV<:CellValues,FV<:FacetValues,IP<:Interpolation,QR<:QuadratureRule}
+struct FEModel{dim,T<:Real,G<:Grid{dim},CV<:CellValues,FV<:FacetValues,IP<:Interpolation,QR<:QuadratureRule}
     grid::G
     centers::Matrix{T}
     elemvol::Vector{T}
 
-    mat_interp::interp
     constraints::Vector{Dirichlet}
 
     cellvalues::CV
@@ -15,7 +14,6 @@ struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{di
     dh::DofHandler{dim,G}
     ch::ConstraintHandler{DofHandler{dim,G},T}
 end
-get_nvar(::FEModel{dim,nvar}) where {dim,nvar} = nvar
 get_dim(::FEModel{dim}) where {dim} = dim
 
 """
@@ -28,7 +26,6 @@ function FEModel(;
     grid::Grid{dim},
     ip::Interpolation,
     qr::QuadratureRule{shape},
-    mat_interp::MaterialInterpolation,
     constraints::Vector{Dirichlet}
 ) where {dim,shape}
     # element type and quadrature rule
@@ -69,5 +66,5 @@ function FEModel(;
         centers[:, id] ./= Ferrite.nnodes_per_cell(grid, id)
     end
 
-    return FEModel(grid, centers, elemvol, mat_interp, constraints, cellvalues, facetvalues, ip, qr, dh, ch)
+    return FEModel(grid, centers, elemvol, constraints, cellvalues, facetvalues, ip, qr, dh, ch)
 end
