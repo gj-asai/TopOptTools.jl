@@ -60,7 +60,7 @@ function LinearElasticity(model::FEModel)
     # preallocate thread local containers
     chnl = Channel{StiffnessScratch}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
-        asm = start_assemble(K; fillzero=false)
+        asm = start_assemble(K; fillzero=false, atomic=true)
         put!(chnl, StiffnessScratch(model, asm))
     end
 
@@ -120,30 +120,28 @@ function update_stiffness!(solver::LinearElasticity, x::AbstractVector)
     nvar = get_nvar(model)
 
     start_assemble(K) # zero K out before starting
-    for color in model.colors
-        @tasks for e in color
-            scratch = take!(chnl)
-            @unpack cell_cache, cellvalues, Ke, jac, cfg, assembler = scratch
+    @tasks for e in 1:getncells(model.grid)
+        scratch = take!(chnl)
+        @unpack cell_cache, cellvalues, Ke, jac, cfg, assembler = scratch
 
-            Ferrite.reinit!(cell_cache, e)
-            Ferrite.reinit!(cellvalues, cell_cache)
+        Ferrite.reinit!(cell_cache, e)
+        Ferrite.reinit!(cellvalues, cell_cache)
 
-            xe = @view x[nvar*(e-1)+1:nvar*e]
+        xe = @view x[nvar*(e-1)+1:nvar*e]
 
-            # update Ke and obtain ∂Ke∂x via automatic differentiation
-            ForwardDiff.jacobian!(
-                jac,
-                (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model),
-                Ke, xe, cfg,
-                Val{false}() # disable tag checking because we are rebuilding the anonymous function
-            )
-            for var_idx = 1:nvar
-                @views ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
-            end
-
-            assemble!(assembler, celldofs(cell_cache), Ke)
-            put!(chnl, scratch)
+        # update Ke and obtain ∂Ke∂x via automatic differentiation
+        ForwardDiff.jacobian!(
+            jac,
+            (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, model),
+            Ke, xe, cfg,
+            Val{false}() # disable tag checking because we are rebuilding the anonymous function
+        )
+        for var_idx = 1:nvar
+            @views ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
         end
+
+        assemble!(assembler, celldofs(cell_cache), Ke)
+        put!(chnl, scratch)
     end
 
     # apply boundary conditions

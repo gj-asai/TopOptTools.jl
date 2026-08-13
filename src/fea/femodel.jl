@@ -14,7 +14,6 @@ struct FEModel{dim,nvar,T<:Real,interp<:MaterialInterpolation{nvar,T},G<:Grid{di
 
     dh::DofHandler{dim,G}
     ch::ConstraintHandler{DofHandler{dim,G},T}
-    colors::Vector{Vector{Int}}
 end
 get_nvar(::FEModel{dim,nvar}) where {dim,nvar} = nvar
 get_dim(::FEModel{dim}) where {dim} = dim
@@ -38,7 +37,6 @@ function FEModel(;
     qr_order = length(Ferrite.getpoints(qr))
     face_qr = FacetQuadratureRule{shape}(qr_order)
     facetvalues = FacetValues(face_qr, ip^dim)
-    colors = create_coloring(grid) # coloring for parallel assemble
 
     # degrees of freedom
     dh = DofHandler(grid)
@@ -71,5 +69,5 @@ function FEModel(;
         centers[:, id] ./= Ferrite.nnodes_per_cell(grid, id)
     end
 
-    return FEModel(grid, centers, elemvol, mat_interp, constraints, cellvalues, facetvalues, ip, qr, dh, ch, colors)
+    return FEModel(grid, centers, elemvol, mat_interp, constraints, cellvalues, facetvalues, ip, qr, dh, ch)
 end

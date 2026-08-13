@@ -60,52 +60,50 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
     Kf = allocate_matrix(dh)
     chnl = Channel{PDEFilterScratch}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
-        asm = start_assemble(Kf; fillzero=false)
+        asm = start_assemble(Kf; fillzero=false, atomic=true)
         put!(chnl, PDEFilterScratch(cv, dh, asm))
     end
 
     n_basefuncs = getnbasefunctions(cv)
     start_assemble(Kf)
-    for color in model.colors
-        @tasks for e in color
-            scratch = take!(chnl)
-            @unpack cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, assembler = scratch
+    @tasks for e in 1:getncells(model.grid)
+        scratch = take!(chnl)
+        @unpack cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, assembler = scratch
 
-            Ferrite.reinit!(cell_cache, e)
-            Ferrite.reinit!(cellvalues, cell_cache)
+        Ferrite.reinit!(cell_cache, e)
+        Ferrite.reinit!(cellvalues, cell_cache)
 
-            fill!(Ke, 0.0)
-            fill!(Te, 0.0)
-            fill!(TXe, 0.0)
+        fill!(Ke, 0.0)
+        fill!(Te, 0.0)
+        fill!(TXe, 0.0)
 
-            @inbounds for q_point in 1:getnquadpoints(cellvalues)
-                dΩ = getdetJdV(cellvalues, q_point)
-                for i in 1:n_basefuncs
-                    Ni = shape_value(cellvalues, q_point, i)
-                    ∇Ni = shape_gradient(cellvalues, q_point, i)
-                    Te[i] += Ni * dΩ
-                    TXe[i] += Ni * dΩ / model.elemvol[e]
-                    for j in 1:i
-                        Nj = shape_value(cellvalues, q_point, j)
-                        ∇Nj = shape_gradient(cellvalues, q_point, j)
-                        Ke[i, j] += (∇Ni ⋅ Kd ⋅ ∇Nj + Ni ⋅ Nj) * dΩ
-                    end
+        for q_point in 1:getnquadpoints(cellvalues)
+            dΩ = getdetJdV(cellvalues, q_point)
+            for i in 1:n_basefuncs
+                Ni = shape_value(cellvalues, q_point, i)
+                ∇Ni = shape_gradient(cellvalues, q_point, i)
+                Te[i] += Ni * dΩ
+                TXe[i] += Ni * dΩ / model.elemvol[e]
+                for j in 1:i
+                    Nj = shape_value(cellvalues, q_point, j)
+                    ∇Nj = shape_gradient(cellvalues, q_point, j)
+                    Ke[i, j] += (∇Ni ⋅ Kd ⋅ ∇Nj + Ni ⋅ Nj) * dΩ
                 end
             end
-
-            for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
-                Ke[i, j] = Ke[j, i]
-            end
-
-            # TODO: make this zero-allocation
-            append!(I_, celldofs(cell_cache))
-            append!(J_, repeat([e], n_basefuncs))
-            append!(T_, Te)
-            append!(TX_, TXe)
-
-            assemble!(assembler, celldofs(cell_cache), Ke)
-            put!(chnl, scratch)
         end
+
+        for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
+            Ke[i, j] = Ke[j, i]
+        end
+
+        # TODO: make this zero-allocation
+        append!(I_, celldofs(cell_cache))
+        append!(J_, repeat([e], n_basefuncs))
+        append!(T_, Te)
+        append!(TX_, TXe)
+
+        assemble!(assembler, celldofs(cell_cache), Ke)
+        put!(chnl, scratch)
     end
     close(chnl) # no more put!, now we can iterate on chnl
 

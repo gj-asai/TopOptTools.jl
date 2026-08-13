@@ -79,8 +79,8 @@ function simp(volfrac, rρ)
         fig = Figure()
         ax = Axis(fig[1, 1], aspect=DataAspect(), xautolimitmargin=(0, 0), yautolimitmargin=(0, 0))
 
-        plotter = FerriteViz.MakiePlotter(model.dh, fesolver.solution)
-        FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
+        ds = FerriteViz.FEData(model.dh, fesolver.solution)
+        FerriteViz.cellplot!(ax, ds, x, colormap=:binary)
         display(fig)
 
         maxiter = 500
@@ -112,7 +112,7 @@ function simp(volfrac, rρ)
             change = norm(x - mma.xold1, Inf)
             @info @sprintf "It = %4d | c = %10.4f | change = %8.2e" (loop - 1) c change
             empty!(ax)
-            FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
+            FerriteViz.cellplot!(ax, ds, x, colormap=:binary)
 
             # Stopping criterion: max change in the design variables
             change < 0.1 && break

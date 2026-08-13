@@ -97,8 +97,8 @@ function thermal_actuator(volfrac, rρ)
         fig = Figure()
         ax = Axis(fig[1, 1], aspect=DataAspect(), xautolimitmargin=(0, 0), yautolimitmargin=(0, 0))
 
-        plotter = FerriteViz.MakiePlotter(model.dh, fesolver.solution)
-        FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
+        ds = FerriteViz.FEData(model.dh, fesolver.solution)
+        FerriteViz.cellplot!(ax, ds, x, colormap=:binary)
         display(fig)
 
         maxiter = 500
@@ -147,7 +147,7 @@ function thermal_actuator(volfrac, rρ)
             # log and plot
             @info @sprintf "It = %4d | u_out = %7.4f | change = %8.2e" (loop - 1) -u_out change
             empty!(ax)
-            FerriteViz.cellplot!(ax, plotter, x, colormap=:binary)
+            FerriteViz.cellplot!(ax, ds, x, colormap=:binary)
 
             # Update history
             push!(history[:objective], u_out)

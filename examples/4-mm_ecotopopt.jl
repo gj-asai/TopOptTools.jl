@@ -128,9 +128,9 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
         cmap1 = GLMakie.Colors.alphacolor.(resample_cmap(:Blues, 11), 0.0:0.1:1.0)
         cmap2 = GLMakie.Colors.alphacolor.(resample_cmap(:Reds, 11), 0.0:0.1:1.0)
 
-        plotter = FerriteViz.MakiePlotter(model.dh, fesolver.solution)
-        FerriteViz.cellplot!(ax, plotter, xPhys[1:3:end], colormap=cmap1)
-        FerriteViz.cellplot!(ax, plotter, xPhys[2:3:end], colormap=cmap2)
+        ds = FerriteViz.FEData(model.dh, fesolver.solution)
+        FerriteViz.cellplot!(ax, ds, xPhys[1:3:end], colormap=cmap1)
+        FerriteViz.cellplot!(ax, ds, xPhys[2:3:end], colormap=cmap2)
         display(fig)
 
         maxiter = 1200
@@ -220,8 +220,8 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
             formatted_volfracs = join([@sprintf("%5.2f", 100 * f) for f in volfracs], ", ")
             @info @sprintf "It = %4d | CO2 = %8.4f | change = %8.2e | c = %9.4f | volfracs = [%s] %%" loop CO2 change c formatted_volfracs
             empty!(ax)
-            FerriteViz.cellplot!(ax, plotter, xPhys[1:3:end], colormap=cmap1)
-            FerriteViz.cellplot!(ax, plotter, xPhys[2:3:end], colormap=cmap2)
+            FerriteViz.cellplot!(ax, ds, xPhys[1:3:end], colormap=cmap1)
+            FerriteViz.cellplot!(ax, ds, xPhys[2:3:end], colormap=cmap2)
 
             # apply continuation
             if (mma.iter >= 100 && change < 1e-4) || mma.iter >= 200
