@@ -33,19 +33,20 @@ function PDEFilterScratch(cv::CellValues, dh::DofHandler, asm::Ferrite.AbstractA
     return PDEFilterScratch(cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, asm)
 end
 
-struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,SS<:MKLPardisoSolver}
+struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,LS<:LinearSolver}
     Kf::TK # stiffness matrix
     T::TT  # project elements to nodes
     TX::TT # project nodes to elements
-    ps::SS # linear solver
+    ls::LS # linear solver
 end
 
 """
-    PDEFilter(radius, model::FEModel)
+    PDEFilter(radius, model::FEModel, solver_type=:direct)
 
-Creates an isotropic Helmholtz PDE filter of radius `radius` for the mesh stored in `model`
+Creates an isotropic Helmholtz PDE filter of radius `radius` for the mesh stored in `model`.
+`solver_type` can be `:direct` or `:iterative`.
 """
-function PDEFilter(radius, model::FEModel{dim}) where {dim}
+function PDEFilter(radius, model::FEModel{dim}; solver_type::Symbol=:direct) where {dim}
     @unpack ip, qr, grid = model
 
     r_filter = radius / (2 * sqrt(3))
@@ -55,6 +56,14 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
     dh = DofHandler(grid)
     add!(dh, :x, ip)
     close!(dh)
+
+    if solver_type == :direct
+        solver = DirectSolver()
+    elseif solver_type == :iterative
+        solver = IterativeSolver(ndofs(dh))
+    else
+        throw("Invalid solver_type $(solver_type), must be :direct or :iterative")
+    end
 
     # preallocate matrices
     Kf = allocate_matrix(dh)
@@ -96,7 +105,6 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
             Ke[i, j] = Ke[j, i]
         end
 
-        # TODO: make this zero-allocation
         append!(I_, celldofs(cell_cache))
         append!(J_, repeat([e], n_basefuncs))
         append!(T_, Te)
@@ -106,8 +114,7 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
         put!(chnl, scratch)
     end
     close(chnl) # no more put!, now we can iterate on chnl
-
-    tril!(Kf) # Pardiso solver will use only the lower part of the matrix
+    update_matrix!(solver, Kf)
 
     # single-threaded final assembly
     I, J = Int[], Int[]
@@ -122,12 +129,7 @@ function PDEFilter(radius, model::FEModel{dim}) where {dim}
     T = sparse(I, J, VT, ndofs(dh), getncells(grid))
     TX = sparse(I, J, VTX, ndofs(dh), getncells(grid))
 
-    ps = MKLPardisoSolver()
-    set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
-    set_iparm!(ps, 1, 1) # to be able to manually set iparm
-    set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
-
-    return PDEFilter(Kf, T, TX, ps)
+    return PDEFilter(Kf, T, TX, solver)
 end
 
 """
@@ -137,11 +139,8 @@ In-place filtering of `x`
 """
 function filter!(x::AbstractVector, f::PDEFilter)
     x_filt = Vector{Float64}(undef, size(f.T, 1))
-    pardiso(f.ps, x_filt, f.Kf, f.T * x)
+    solve!(f.ls, x_filt, f.Kf, f.T * x)
     x .= f.TX' * x_filt
-
-    # Kf doesnt change, so next solves can reuse the factorization
-    set_phase!(f.ps, Pardiso.SOLVE_ITERATIVE_REFINE)
 end
 
 """

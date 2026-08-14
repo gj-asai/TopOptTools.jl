@@ -15,7 +15,7 @@ struct StiffnessScratch{CC<:CellCache,CV<:CellValues,JCFG<:ForwardDiff.JacobianC
     cfg::JCFG
     assembler::A
 end
-function StiffnessScratch(model::FEModel{dim}, asm::Ferrite.AbstractAssembler, nvar::Int) where {dim}
+function StiffnessScratch(model::FEModel, asm::Ferrite.AbstractAssembler, nvar::Int)
     cell_cache = CellCache(model.dh)
     cellvalues = copy(model.cellvalues)
     n_basefuncs = getnbasefunctions(cellvalues)
@@ -32,30 +32,24 @@ function StiffnessScratch(model::FEModel{dim}, asm::Ferrite.AbstractAssembler, n
 end
 
 """
-    solve!(solver::FEA, f::AbstractVector)
+    solve!(fea::FEA, f::AbstractVector)
 
-Solves the finite element problem with the stiffness matrix stored in `solver` and right hand side `f`.
-Stores the result in `solver.solution`
+Solves the finite element problem with the stiffness matrix stored in `fea` and right hand side `f`.
+Stores the result in `fea.solution`
 """
-function solve!(solver::FEA, f::AbstractVector)
-    @unpack K, solution, ps = solver
-
-    # solve linear system and store result in solver.solution
-    pardiso(ps, solution, tril(K), f)
-    set_phase!(ps, Pardiso.SOLVE_ITERATIVE_REFINE) # reuse K for next solves
-end
+solve!(fea::FEA, f::AbstractVector) = solve!(fea.solver, fea.solution, fea.K, f)
 
 """
-    adjoint_sensitivities!(dJdx, lambda, displacements, solver::FEA)
+    adjoint_sensitivities!(dJdx, lambda, displacements, fea::FEA)
 
 Uses the adjoint system to compute the sensitivities ∂J/∂x of a function J(u).
 
-`lambda` is the vector of adjoint variables, obtained from calling `fea!` with right hand side dJ/du.
-`displacements` is the vector of nodal displacements, obtained from calling `fea!` with right hand side equal to the forces vector
+`lambda` is the vector of adjoint variables, obtained from calling `solve!` with right hand side dJ/du.
+`displacements` is the vector of nodal displacements, obtained from calling `solve!` with right hand side equal to the forces vector
 """
-function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FEA{nvar}) where {nvar}
-    model = solver.model
-    ∂Ke∂x = solver.∂Ke∂x
+function adjoint_sensitivities!(dJdx, lambda, displacements, fea::FEA{nvar}) where {nvar}
+    model = fea.model
+    ∂Ke∂x = fea.∂Ke∂x
     for cell in CellIterator(model.dh)
         e = cellid(cell)
         dofs = celldofs(cell)
@@ -68,16 +62,16 @@ function adjoint_sensitivities!(dJdx, lambda, displacements, solver::FEA{nvar}) 
 end
 
 """
-    update_stiffness!(solver::FEA, x::AbstractVector)
+    update_stiffness!(fea::FEA, x::AbstractVector)
 
 Recomputes the stiffness matrix, using the new design variables `x`.
-Needed to update the stiffness matrix before calling `fea!` and `adjoint_sensitivities!`
+Needed to update the stiffness matrix before calling `solve!` and `adjoint_sensitivities!`
 """
-function update_stiffness!(solver::FEA{nvar}, x::AbstractVector) where {nvar}
-    solver.x .= x
+function update_stiffness!(fea::FEA{nvar}, x::AbstractVector) where {nvar}
+    fea.x .= x
 
-    @unpack ps, x, K, ∂Ke∂x, chnl = solver
-    model = solver.model
+    @unpack x, K, ∂Ke∂x, chnl = fea
+    model = fea.model
 
     n_basefuncs = getnbasefunctions(model.cellvalues)
 
@@ -94,7 +88,7 @@ function update_stiffness!(solver::FEA{nvar}, x::AbstractVector) where {nvar}
         # update Ke and obtain ∂Ke∂x via automatic differentiation
         ForwardDiff.jacobian!(
             jac,
-            (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, solver),
+            (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, fea),
             Ke, xe, cfg,
             Val{false}() # disable tag checking because we are rebuilding the anonymous function
         )
@@ -109,14 +103,11 @@ function update_stiffness!(solver::FEA{nvar}, x::AbstractVector) where {nvar}
     # apply boundary conditions
     apply!(K, model.ch)
 
-    # tell Pardiso to recalculate the numerical factorization in the next solve
-    # the sparsity pattern of K doesnt change, skip the symbolic factorization
-    if get_phase(ps) == Pardiso.SOLVE_ITERATIVE_REFINE
-        set_phase!(ps, Pardiso.NUM_FACT_SOLVE_REFINE)
-    end
+    # tell the linear solver that the matrix changed
+    update_matrix!(fea.solver, K)
 end
 
 # xe is a view of the design vector that contains the variables corresponding to one element
-function element_stiffness!(::Matrix, ::AbstractVector, ::CellValues, solver::FEA)
-    throw("Method element_stiffness!(Ke::Matrix, xe::AbstractVector, cv::CellValues, ::$(typeof(solver))) is not defined")
+function element_stiffness!(::Matrix, ::AbstractVector, ::CellValues, fea::FEA)
+    throw("Method element_stiffness!(Ke::Matrix, xe::AbstractVector, cv::CellValues, ::$(typeof(fea))) is not defined")
 end

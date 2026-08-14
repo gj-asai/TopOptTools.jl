@@ -1,13 +1,16 @@
 name = "TopOptTools"
 uuid = "d486209d-77d0-459c-90e8-0e65762702e0"
 authors = ["Gustavo Asai"]
-version = "0.9.0"
+version = "0.9.1"
 
 [deps]
+AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
 Ferrite = "c061ca5d-56c9-439f-9c0e-210fe06d3992"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MKL = "33e6dc65-8f57-5167-99aa-e5a354878fb2"
+MKLSparse = "0c723cd3-b8cd-5d40-b370-ba682dde9aae"
 NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 Pardiso = "46dd5b70-b6fb-5a00-ae2d-e8fea33afaf2"

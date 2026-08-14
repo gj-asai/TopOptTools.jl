@@ -78,6 +78,12 @@ git-tree-sha1 = "7e651ea8d262d2d74ce75fdf47c4d63c07dba7a6"
 uuid = "35492f91-a3bd-45ad-95db-fcad7dcfedb7"
 version = "1.2.0"
 
+[[deps.AlgebraicMultigrid]]
+deps = ["CommonSolve", "LinearAlgebra", "Printf", "Reexport", "SparseArrays"]
+git-tree-sha1 = "796eedcb42226861a51d92d28ee82d4985ee860b"
+uuid = "2169fc97-5a83-5252-b627-83903c6c433c"
+version = "0.5.1"
+
 [[deps.AliasTables]]
 deps = ["PtrArrays", "Random"]
 git-tree-sha1 = "9876e1e164b144ca45e9e3198d0b689cadfed9ff"
@@ -96,9 +102,9 @@ version = "1.1.2"
 
 [[deps.ArrayInterface]]
 deps = ["Adapt", "LinearAlgebra"]
-git-tree-sha1 = "60f11b38ebeabd984f5535838d91e197d97202f0"
+git-tree-sha1 = "b79a0bd275c2036b3ab9ed42ddef6f5eb48e1902"
 uuid = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
-version = "7.28.1"
+version = "7.29.0"
 
     [deps.ArrayInterface.extensions]
     ArrayInterfaceAMDGPUExt = "AMDGPU"
@@ -1026,6 +1032,12 @@ git-tree-sha1 = "9eda8292dd3268b3b7ec9df21bbfac24e177ec52"
 uuid = "5ab0869b-81aa-558d-bb23-cbf5423bbe9b"
 version = "0.6.12"
 
+[[deps.Krylov]]
+deps = ["LinearAlgebra", "Printf", "SparseArrays"]
+git-tree-sha1 = "71e740d00d71cdb15145d7fe0d6000ec70534598"
+uuid = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
+version = "0.10.9"
+
 [[deps.LAME_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "059aabebaa7c82ccb853dd4a0ee9d17796f7e1bc"
@@ -1178,6 +1190,12 @@ deps = ["Artifacts", "Libdl", "LinearAlgebra", "Logging", "MKL_jll"]
 git-tree-sha1 = "7babad0b8cb353d15ed85090342d3c63af5f6819"
 uuid = "33e6dc65-8f57-5167-99aa-e5a354878fb2"
 version = "0.9.1"
+
+[[deps.MKLSparse]]
+deps = ["LinearAlgebra", "MKL_jll", "SparseArrays"]
+git-tree-sha1 = "7c530bb990da20417879d5e2e2e5ea684f1b60ba"
+uuid = "0c723cd3-b8cd-5d40-b370-ba682dde9aae"
+version = "3.0.0"
 
 [[deps.MKL_jll]]
 deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "oneTBB_jll"]
@@ -1918,10 +1936,10 @@ version = "1.2.0"
     FlameGraphs = "08572546-2f56-4bcf-ba4e-bab62c3a3f89"
 
 [[deps.TopOptTools]]
-deps = ["Ferrite", "ForwardDiff", "LinearAlgebra", "MKL", "NearestNeighbors", "Optim", "Pardiso", "SparseArrays", "Tensors", "UnPack"]
+deps = ["AlgebraicMultigrid", "Ferrite", "ForwardDiff", "Krylov", "LinearAlgebra", "MKL", "MKLSparse", "NearestNeighbors", "Optim", "Pardiso", "SparseArrays", "Tensors", "UnPack"]
 path = ".."
 uuid = "d486209d-77d0-459c-90e8-0e65762702e0"
-version = "0.8.0"
+version = "0.9.0"
 
 [[deps.TranscodingStreams]]
 git-tree-sha1 = "0c45878dcfdcfa8480052b6ab162cdd138781742"

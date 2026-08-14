@@ -1,6 +1,6 @@
-struct LinearElasticity{FEM<:FEModel,nvar,MatInterp<:MaterialInterpolation{nvar},SS<:StiffnessScratch} <: FEA{nvar}
+struct LinearElasticity{nvar,FEM<:FEModel,LS<:LinearSolver,MatInterp<:MaterialInterpolation{nvar},SS<:StiffnessScratch} <: FEA{nvar}
     model::FEM
-    ps::MKLPardisoSolver
+    solver::LS
 
     x::Vector{Float64}
     mat_interp::MatInterp
@@ -10,11 +10,14 @@ struct LinearElasticity{FEM<:FEModel,nvar,MatInterp<:MaterialInterpolation{nvar}
     solution::Vector{Float64}
     chnl::Channel{SS}
 end
-function LinearElasticity(model::FEModel, mat_interp::MaterialInterpolation{nvar}) where {nvar}
-    ps = MKLPardisoSolver()
-    set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
-    set_iparm!(ps, 1, 1) # to be able to manually set iparm
-    set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
+function LinearElasticity(model::FEModel, mat_interp::MaterialInterpolation{nvar}; solver_type::Symbol=:direct) where {nvar}
+    if solver_type == :direct
+        solver = DirectSolver()
+    elseif solver_type == :iterative
+        solver = IterativeSolver(ndofs(model.dh))
+    else
+        throw("Invalid solver_type $(solver_type), must be :direct or :iterative")
+    end
 
     # preallocate vectors
     x0 = Vector{Float64}(undef, getncells(model.grid) * nvar)
@@ -32,10 +35,10 @@ function LinearElasticity(model::FEModel, mat_interp::MaterialInterpolation{nvar
         put!(chnl, StiffnessScratch(model, asm, nvar))
     end
 
-    return LinearElasticity(model, ps, x0, mat_interp, K, ∂Ke∂x, solution, chnl)
+    return LinearElasticity(model, solver, x0, mat_interp, K, ∂Ke∂x, solution, chnl)
 end
 
-function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellValues, solver::LinearElasticity) where {T<:Real}
+function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellValues, fea::LinearElasticity) where {T<:Real}
     fill!(Ke, zero(T))
 
     for q_point in 1:getnquadpoints(cellvalues)
@@ -44,7 +47,7 @@ function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellV
             ∇sδεi = shape_symmetric_gradient(cellvalues, q_point, i)
             for j in 1:i
                 ∇sδεj = shape_symmetric_gradient(cellvalues, q_point, j)
-                Ke[i, j] += ∇sδεi ⊡ interpolate(xe, solver.mat_interp) ⊡ ∇sδεj * dΩ
+                Ke[i, j] += ∇sδεi ⊡ interpolate(xe, fea.mat_interp) ⊡ ∇sδεj * dΩ
             end
         end
     end

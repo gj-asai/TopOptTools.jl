@@ -1,15 +1,19 @@
 module TopOptTools
 
 using MKL
-using Pardiso,
-    Optim,
-    Ferrite,
-    Tensors,
-    LinearAlgebra,
-    SparseArrays,
-    ForwardDiff,
-    NearestNeighbors,
-    UnPack
+using MKLSparse
+
+using AlgebraicMultigrid
+using Ferrite
+using ForwardDiff
+using Krylov
+using LinearAlgebra
+using NearestNeighbors
+using Optim
+using Pardiso
+using SparseArrays
+using Tensors
+using UnPack
 
 export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D
 export MaterialInterpolation
@@ -23,6 +27,7 @@ export project_heaviside!, project_heaviside_derivative!
 
 # Finite element analysis
 include("fea/femodel.jl")
+include("fea/linear_solver.jl")
 include("fea/fea.jl")
 include("fea/loads.jl")
 
