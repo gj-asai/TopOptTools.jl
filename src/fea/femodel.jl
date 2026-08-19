@@ -3,6 +3,7 @@ struct FEModel{dim,T<:Real,G<:Grid{dim},CV<:CellValues,FV<:FacetValues,IP<:Inter
     grid::G
     centers::Matrix{T}
     elemvol::Vector{T}
+    colors::Vector{Vector{Int}}
 
     constraints::Vector{Dirichlet}
 
@@ -55,6 +56,8 @@ function FEModel(;
         end
     end
 
+    colors = create_coloring(grid) # coloring for multithreaded assembly
+
     # element centroids
     centers = zeros(dim, getncells(grid))
     for cell in CellIterator(dh)
@@ -65,5 +68,5 @@ function FEModel(;
         centers[:, id] ./= Ferrite.nnodes_per_cell(grid, id)
     end
 
-    return FEModel(grid, centers, elemvol, constraints, cellvalues, facetvalues, ip, qr, dh, ch)
+    return FEModel(grid, centers, elemvol, colors, constraints, cellvalues, facetvalues, ip, qr, dh, ch)
 end

@@ -1,12 +1,9 @@
 module TopOptTools
 
 using MKL
-using MKLSparse
 
-using AlgebraicMultigrid
 using Ferrite
 using ForwardDiff
-using Krylov
 using LinearAlgebra
 using NearestNeighbors
 using Optim
@@ -15,19 +12,18 @@ using SparseArrays
 using Tensors
 using UnPack
 
+export FEModel
 export Material, Isotropic2D, Isotropic3D, Orthotropic2D, Orthotropic3D
 export MaterialInterpolation
-export FEModel
-export solve!, adjoint_sensitivities!, update_stiffness!
-export LinearElasticity
 export NodalLoad, LinearLoad, EigenstrainLoad, compute_rhs, compute_rhs!
+export FEA, LinearElasticity
+export solve!, adjoint_sensitivities!, update_stiffness!
 export MMAWorkspace, mma_update!, restart!
 export ConvolutionFilter, PDEFilter, filter!
 export project_heaviside!, project_heaviside_derivative!
 
 # Finite element analysis
 include("fea/femodel.jl")
-include("fea/linear_solver.jl")
 include("fea/fea.jl")
 include("fea/loads.jl")
 

@@ -33,20 +33,21 @@ function PDEFilterScratch(cv::CellValues, dh::DofHandler, asm::Ferrite.AbstractA
     return PDEFilterScratch(cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, asm)
 end
 
-struct PDEFilter{TK<:SparseMatrixCSC,TT<:SparseMatrixCSC,LS<:LinearSolver}
-    Kf::TK # stiffness matrix
-    T::TT  # project elements to nodes
-    TX::TT # project nodes to elements
-    ls::LS # linear solver
+struct PDEFilter{M<:SparseMatrixCSC}
+    Kf::M # stiffness matrix
+    T::M  # project elements to nodes
+    TX::M # project nodes to elements
+    ps::MKLPardisoSolver # linear solver
+    xnodal::Vector{Float64}
+    rhs::Vector{Float64}
 end
 
 """
-    PDEFilter(radius, model::FEModel, solver_type=:direct)
+    PDEFilter(radius, model::FEModel)
 
 Creates an isotropic Helmholtz PDE filter of radius `radius` for the mesh stored in `model`.
-`solver_type` can be `:direct` or `:iterative`.
 """
-function PDEFilter(radius, model::FEModel{dim}; solver_type::Symbol=:direct) where {dim}
+function PDEFilter(radius, model::FEModel{dim}) where {dim}
     @unpack ip, qr, grid = model
 
     r_filter = radius / (2 * sqrt(3))
@@ -57,64 +58,58 @@ function PDEFilter(radius, model::FEModel{dim}; solver_type::Symbol=:direct) whe
     add!(dh, :x, ip)
     close!(dh)
 
-    if solver_type == :direct
-        solver = DirectSolver()
-    elseif solver_type == :iterative
-        solver = IterativeSolver(ndofs(dh))
-    else
-        throw("Invalid solver_type $(solver_type), must be :direct or :iterative")
-    end
-
     # preallocate matrices
     Kf = allocate_matrix(dh)
     chnl = Channel{PDEFilterScratch}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
-        asm = start_assemble(Kf; fillzero=false, atomic=true)
+        asm = start_assemble(Kf; fillzero=false)
         put!(chnl, PDEFilterScratch(cv, dh, asm))
     end
 
     n_basefuncs = getnbasefunctions(cv)
     start_assemble(Kf)
-    Threads.@threads for e in 1:getncells(model.grid)
-        scratch = take!(chnl)
-        @unpack cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, assembler = scratch
+    for color in model.colors
+        Threads.@threads for e in color
+            scratch = take!(chnl)
+            @unpack cell_cache, cellvalues, Ke, Te, TXe, I_, J_, T_, TX_, assembler = scratch
 
-        Ferrite.reinit!(cell_cache, e)
-        Ferrite.reinit!(cellvalues, cell_cache)
+            Ferrite.reinit!(cell_cache, e)
+            Ferrite.reinit!(cellvalues, cell_cache)
 
-        fill!(Ke, 0.0)
-        fill!(Te, 0.0)
-        fill!(TXe, 0.0)
+            fill!(Ke, 0.0)
+            fill!(Te, 0.0)
+            fill!(TXe, 0.0)
 
-        for q_point in 1:getnquadpoints(cellvalues)
-            dΩ = getdetJdV(cellvalues, q_point)
-            for i in 1:n_basefuncs
-                Ni = shape_value(cellvalues, q_point, i)
-                ∇Ni = shape_gradient(cellvalues, q_point, i)
-                Te[i] += Ni * dΩ
-                TXe[i] += Ni * dΩ / model.elemvol[e]
-                for j in 1:i
-                    Nj = shape_value(cellvalues, q_point, j)
-                    ∇Nj = shape_gradient(cellvalues, q_point, j)
-                    Ke[i, j] += (∇Ni ⋅ Kd ⋅ ∇Nj + Ni ⋅ Nj) * dΩ
+            for q_point in 1:getnquadpoints(cellvalues)
+                dΩ = getdetJdV(cellvalues, q_point)
+                for i in 1:n_basefuncs
+                    Ni = shape_value(cellvalues, q_point, i)
+                    ∇Ni = shape_gradient(cellvalues, q_point, i)
+                    Te[i] += Ni * dΩ
+                    TXe[i] += Ni * dΩ / model.elemvol[e]
+                    for j in 1:i
+                        Nj = shape_value(cellvalues, q_point, j)
+                        ∇Nj = shape_gradient(cellvalues, q_point, j)
+                        Ke[i, j] += (∇Ni ⋅ Kd ⋅ ∇Nj + Ni * Nj) * dΩ
+                    end
                 end
             end
+
+            for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
+                Ke[i, j] = Ke[j, i]
+            end
+
+            append!(I_, celldofs(cell_cache))
+            append!(J_, repeat([e], n_basefuncs))
+            append!(T_, Te)
+            append!(TX_, TXe)
+
+            assemble!(assembler, celldofs(cell_cache), Ke)
+            put!(chnl, scratch)
         end
-
-        for i in axes(Ke, 1), j in axes(Ke, 1)[begin+i:end]
-            Ke[i, j] = Ke[j, i]
-        end
-
-        append!(I_, celldofs(cell_cache))
-        append!(J_, repeat([e], n_basefuncs))
-        append!(T_, Te)
-        append!(TX_, TXe)
-
-        assemble!(assembler, celldofs(cell_cache), Ke)
-        put!(chnl, scratch)
     end
     close(chnl) # no more put!, now we can iterate on chnl
-    update_matrix!(solver, Kf)
+    tril!(Kf)
 
     # single-threaded final assembly
     I, J = Int[], Int[]
@@ -127,9 +122,16 @@ function PDEFilter(radius, model::FEModel{dim}; solver_type::Symbol=:direct) whe
     end
 
     T = sparse(I, J, VT, ndofs(dh), getncells(grid))
-    TX = sparse(I, J, VTX, ndofs(dh), getncells(grid))
+    TX = sparse(J, I, VTX, getncells(grid), ndofs(dh))
+    xnodal = Vector{Float64}(undef, ndofs(dh))
+    rhs = Vector{Float64}(undef, ndofs(dh))
 
-    return PDEFilter(Kf, T, TX, solver)
+    ps = MKLPardisoSolver()
+    set_matrixtype!(ps, Pardiso.REAL_SYM_POSDEF)
+    set_iparm!(ps, 1, 1) # to be able to manually set iparm
+    set_iparm!(ps, 12, 1) # tells Pardiso we are giving a CSC matrix instead of CSR
+
+    return PDEFilter(Kf, T, TX, ps, xnodal, rhs)
 end
 
 """
@@ -138,16 +140,18 @@ end
 In-place filtering of `x`
 """
 function filter!(x::AbstractVector, f::PDEFilter)
-    x_filt = Vector{Float64}(undef, size(f.T, 1))
-    solve!(f.ls, x_filt, f.Kf, f.T * x)
-    x .= f.TX' * x_filt
+    mul!(f.rhs, f.T, x) # f.rhs = f.T * x
+    pardiso(f.ps, f.xnodal, f.Kf, f.rhs)
+    mul!(x, f.TX, f.xnodal) # x = f.TX * f.xnodal
+
+    set_phase!(f.ps, Pardiso.SOLVE_ITERATIVE_REFINE) # reuse factorization for next solves
 end
 
 """
     filter!(x::AbstractVector, weight::AbstractVector, f::PDEFilter)
 
 In-place filtering of `x` using weights `weight`:
-weight * xfiltered = H * (weight * x)
+weight * xfiltered = filter(weight * x)
 """
 function filter!(x::AbstractVector, weight::AbstractVector, f::PDEFilter)
     x .*= weight

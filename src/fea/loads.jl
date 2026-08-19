@@ -56,7 +56,7 @@ end
 function compute_rhs!(rhs::AbstractVector, jac_rhs::Matrix, loads::Vector{<:Load}, model::FEModel, x::AbstractVector)
     fill!(rhs, 0.0)
     add_design_independent_loads!(rhs, loads, model)
-    add_design_dependent_loads!(rhs, jac_rhs, loads, model, x)
+    add_design_dependent_loads!(rhs, jac_rhs, loads, model, x, length(x) ÷ getncells(model.grid))
     apply!(rhs, model.ch)
     return rhs, jac_rhs
 end
@@ -99,7 +99,7 @@ function add_design_independent_loads!(rhs::AbstractVector, loads::Vector{<:Load
 end
 
 # TODO: make this multithreaded?
-function add_design_dependent_loads!(rhs::AbstractVector, jac_rhs::Matrix, loads::Vector{<:Load}, model::FEModel{dim,nvar}, x::AbstractVector) where {dim,nvar}
+function add_design_dependent_loads!(rhs::AbstractVector, jac_rhs::Matrix, loads::Vector{<:Load}, model::FEModel, x::AbstractVector, nvar::Int)
     fe = zeros(getnbasefunctions(model.facetvalues))
     jac = zeros(getnbasefunctions(model.facetvalues), nvar)
     for cell in CellIterator(model.dh)

@@ -61,7 +61,7 @@ function simp(volfrac, rρ)
     dgdx = zeros(1, getncells(grid))
 
     # initialize FE solver
-    fesolver = LinearElasticity(model, mat_interp)
+    fesolver = FEA(model, LinearElasticity(mat_interp))
 
     @timeit "build filters" begin
         @info "Building sensitivity filter with radius $rρ"

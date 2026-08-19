@@ -94,7 +94,7 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
     dgdx = zeros(2, 3 * getncells(grid))
 
     # initialize linear solver
-    fesolver = LinearElasticity(model, mat_interp)
+    fesolver = FEA(model, LinearElasticity(mat_interp))
 
     @timeit "build filters" begin
         @info "Building sensitivity filter with radius $rρ"

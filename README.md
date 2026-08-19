@@ -5,14 +5,13 @@ Check the exported members of module [`TopOptTools`](src/TopOptTools.jl) for an 
 
 Finite element analyses use [`Ferrite.jl`](https://github.com/Ferrite-FEM/Ferrite.jl) finite element toolbox.
 Derivatives of the stiffness matrix with respect to the element variables are computed via automatic differentiation - [`ForwardDiff.jl`](https://github.com/JuliaDiff/ForwardDiff.jl).
-Linear systems can be solved using MKL Pardiso's sparse direct solver via [`Pardiso.jl`](https://github.com/JuliaSparse/Pardiso.jl) or Algebraic Multigrid Preconditioned Conjugate Gradient (AMG-PCG) sparse iterative solver from [`Krylov.jl`](https://github.com/JuliaSmoothOptimizers/Krylov.jl) and [`AlgebraicMultigrid.jl`](https://github.com/JuliaLinearAlgebra/AlgebraicMultigrid.jl).
-
-Parallelization is done via multithreading, which enables some level of scalability on the problem size without many changes in the structure of the program and of the data.
+Linear systems are solved using MKL Pardiso sparse direct solver via [`Pardiso.jl`](https://github.com/JuliaSparse/Pardiso.jl).
+Parallelization is done via multithreading on the finite element matrix assembly and linear system solve.
 
 MMA subproblems are solved with [`Optim.jl`](https://github.com/JuliaNLSolvers/Optim.jl). The dual problem is solved with the default configuration for box constrained optimizations: Fminbox (a barrier method) with L-BGFS as line search algorithm.
 
 > [!NOTE]
-> The `TopOptTools` module uses [`MKL.jl`](https://github.com/JuliaLinearAlgebra/MKL.jl) and [`MKLSparse.jl`](https://github.com/JuliaSparse/MKLSparse.jl) instead of the default BLAS backend. This may affect multithreaded code that interacts with it
+> The `TopOptTools` module uses [`MKL.jl`](https://github.com/JuliaLinearAlgebra/MKL.jl) instead of the default BLAS backend. This may affect multithreaded code that interacts with it
 
 ## Installation
 To add this package as a dependency to your project, run `]add https://gitlab.tudelft.nl/shapingmatterlab/TopOptTools.jl.git`.
