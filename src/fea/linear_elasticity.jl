@@ -5,13 +5,16 @@ end
 function element_stiffness!(Ke::Matrix{T}, xe::AbstractVector, cellvalues::CellValues, stiff_builder::LinearElasticity) where {T<:Real}
     fill!(Ke, zero(T))
 
+    # C is the same in all quadrature points
+    C = interpolate(xe, stiff_builder.mat_interp)
+
     for q_point in 1:getnquadpoints(cellvalues)
         dΩ = getdetJdV(cellvalues, q_point)
         for i in 1:getnbasefunctions(cellvalues)
             ∇sδεi = shape_symmetric_gradient(cellvalues, q_point, i)
             for j in 1:i
                 ∇sδεj = shape_symmetric_gradient(cellvalues, q_point, j)
-                Ke[i, j] += ∇sδεi ⊡ interpolate(xe, stiff_builder.mat_interp) ⊡ ∇sδεj * dΩ
+                Ke[i, j] += ∇sδεi ⊡ C ⊡ ∇sδεj * dΩ
             end
         end
     end
