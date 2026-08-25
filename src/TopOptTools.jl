@@ -20,7 +20,6 @@ export FEA, LinearElasticity
 export solve!, adjoint_sensitivities!, update_stiffness!
 export MMAWorkspace, mma_update!, restart!
 export ConvolutionFilter, PDEFilter, filter!
-export project_heaviside!, project_heaviside_derivative!
 
 # Finite element analysis
 include("fea/femodel.jl")
@@ -37,6 +36,5 @@ include("mma/mma.jl")
 # Filtering and projection
 include("filtering/convolution.jl")
 include("filtering/pde.jl")
-include("filtering/heaviside.jl")
 
 end # module TopOptTools

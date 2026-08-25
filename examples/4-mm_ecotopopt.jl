@@ -25,9 +25,9 @@ function TopOptTools.interpolate(xe::AbstractVector{T}, interp::MMSOMP{2}) where
                 weight *= one(T) - ρ[j]^interp.penal
             end
         end
-        result += weight * rotate(interp.mat[i].C, θ)
+        result += weight * interp.mat[i].C
     end
-    result += TopOptTools.void(Val(2)).C
+    result = TopOptTools.void2D.C + rotate(result, θ)
     return result
 end
 
@@ -124,7 +124,7 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
         fig = Figure()
         ax = Axis(fig[1, 1], aspect=DataAspect(), xautolimitmargin=(0, 0), yautolimitmargin=(0, 0), xgridvisible=false, ygridvisible=false)
 
-        # colormaps with transparency for eadch material
+        # colormaps with transparency for each material
         cmap1 = GLMakie.Colors.alphacolor.(resample_cmap(:Blues, 11), 0.0:0.1:1.0)
         cmap2 = GLMakie.Colors.alphacolor.(resample_cmap(:Reds, 11), 0.0:0.1:1.0)
 
@@ -136,15 +136,16 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
         maxiter = 1200
         for loop in 1:maxiter
             @timeit "filter and project" begin
+                # filter
                 xTilde .= x
-
                 @views TopOptTools.filter!(xTilde[1:3:end], density_filter)
                 @views TopOptTools.filter!(xTilde[2:3:end], density_filter)
                 @views TopOptTools.filter!(xTilde[3:3:end], orientation_filter)
 
-                xPhys .= xTilde
-                @views project_heaviside!(xPhys[1:3:end], beta, eta)
-                @views project_heaviside!(xPhys[2:3:end], beta, eta)
+                # heaviside projection
+                @. xPhys[1:3:end] = (tanh(beta * eta) + tanh(beta * (xTilde[1:3:end] - eta))) / (tanh(beta * eta) + tanh(beta * (1 - eta)))
+                @. xPhys[2:3:end] = (tanh(beta * eta) + tanh(beta * (xTilde[2:3:end] - eta))) / (tanh(beta * eta) + tanh(beta * (1 - eta)))
+                @. xPhys[3:3:end] = xTilde[3:3:end]
             end
 
             @timeit "assemble stiffness" update_stiffness!(fesolver, xPhys)
@@ -181,20 +182,20 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
                 dvdx[2:3:end] .= model.elemvol
                 dvdx[3:3:end] .= 0.0
 
-                # Chain rule
-                dPhysdTilde .= xTilde
-                @views project_heaviside_derivative!(dPhysdTilde, beta, eta)
+                # Chain rule - xPhys -> xTilde
+                @. dPhysdTilde[1:3:end] = beta * sech(beta * (xTilde[1:3:end] - eta))^2 / (tanh(beta * eta) + tanh(beta * (1 - eta)))
+                @. dPhysdTilde[2:3:end] = beta * sech(beta * (xTilde[2:3:end] - eta))^2 / (tanh(beta * eta) + tanh(beta * (1 - eta)))
+                @. dPhysdTilde[3:3:end] = 1.0
+                dCO2dx .*= dPhysdTilde
+                dcdx .*= dPhysdTilde
+                dvdx .*= dPhysdTilde
 
+                # Chain rule - xTilde -> x
                 # densities
                 for i in 1:2
-                    dCO2dx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
-                    @views TopOptTools.filter!(dCO2dx[i:3:end], density_filter) # xTilde -> x
-
-                    dcdx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
-                    @views TopOptTools.filter!(dcdx[i:3:end], density_filter) # xTilde -> x
-
-                    dvdx[i:3:end] .*= dPhysdTilde[i:3:end] # xPhys -> xTilde
-                    @views TopOptTools.filter!(dvdx[i:3:end], density_filter) # xTilde -> x
+                    @views TopOptTools.filter!(dCO2dx[i:3:end], density_filter)
+                    @views TopOptTools.filter!(dcdx[i:3:end], density_filter)
+                    @views TopOptTools.filter!(dvdx[i:3:end], density_filter)
                 end
                 # angles, no need to filter dCO2dtheta and dvdtheta, they are all zero
                 @views TopOptTools.filter!(dcdx[3:3:end], orientation_filter)
@@ -227,7 +228,7 @@ function mm_ecotopopt(comp_max, volfrac, rρ, rθ, angle=0)
             if (mma.iter >= 100 && change < 1e-4) || mma.iter >= 200
                 # if at max beta, stop the optimization
                 beta == 64 && break
-                # else, increase beta and p, decrease gamma
+                # else, increase beta and p
                 beta *= 2
                 mat_interp.penal = min(3.0, mat_interp.penal + 1.0)
                 @info "Updated beta to $(beta) and p to $(mat_interp.penal)"
