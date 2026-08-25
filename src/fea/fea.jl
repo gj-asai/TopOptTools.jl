@@ -1,31 +1,37 @@
 """
+Contains the physics of the problem. Implements the stiffness calculation for each element
+"""
+abstract type StiffnessBuilder{nvar} end
+
+"""
 Contains the task local data for parallel stiffness assemble
 """
-struct StiffnessScratch{CC<:CellCache,CV<:CellValues,JCFG<:ForwardDiff.JacobianConfig,A<:Ferrite.AbstractAssembler}
+struct StiffnessScratch{CC<:CellCache,CV<:CellValues,F<:Function,JCFG<:ForwardDiff.JacobianConfig,A<:Ferrite.AbstractAssembler}
     cell_cache::CC
     cellvalues::CV
     Ke::Matrix{Float64}
     jac::Matrix{Float64}
+    element_fun::F
     cfg::JCFG
     assembler::A
 end
-function StiffnessScratch(model::FEModel, asm::Ferrite.AbstractAssembler, nvar::Int)
+function StiffnessScratch(model::FEModel, stiff_builder::StiffnessBuilder, asm::Ferrite.AbstractAssembler, nvar::Int)
     cell_cache = CellCache(model.dh)
     cellvalues = copy(model.cellvalues)
     n_basefuncs = getnbasefunctions(cellvalues)
 
     Ke = zeros(n_basefuncs, n_basefuncs)
     jac = zeros(n_basefuncs * n_basefuncs, nvar)
+
+    element_stiffness(Ke, xe) = element_stiffness!(Ke, xe, cellvalues, stiff_builder)
     cfg = ForwardDiff.JacobianConfig(
-        (Ke, xe) -> element_stiffness!(Ke, xe, cell_cache, model),
+        element_stiffness,
         Ke, zeros(nvar),
         ForwardDiff.Chunk{nvar}()
     )
 
-    return StiffnessScratch(cell_cache, cellvalues, Ke, jac, cfg, asm)
+    return StiffnessScratch(cell_cache, cellvalues, Ke, jac, element_stiffness, cfg, asm)
 end
-
-abstract type StiffnessBuilder{nvar} end
 
 """
 Contains the data necessary for the linear system solve and stores the results.
@@ -57,7 +63,7 @@ function FEA(model::FEModel, stiff_builder::StiffnessBuilder{nvar}) where {nvar}
     chnl = Channel{StiffnessScratch}(Threads.nthreads())
     foreach(1:Threads.nthreads()) do _
         asm = start_assemble(K; fillzero=false)
-        put!(chnl, StiffnessScratch(model, asm, nvar))
+        put!(chnl, StiffnessScratch(model, stiff_builder, asm, nvar))
     end
 
     ps = MKLPardisoSolver()
@@ -119,7 +125,7 @@ function update_stiffness!(fea::FEA{nvar}, x::AbstractVector) where {nvar}
     for color in model.colors
         Threads.@threads for e in color
             scratch = take!(chnl)
-            @unpack cell_cache, cellvalues, Ke, jac, cfg, assembler = scratch
+            @unpack cell_cache, cellvalues, Ke, element_fun, jac, cfg, assembler = scratch
 
             Ferrite.reinit!(cell_cache, e)
             Ferrite.reinit!(cellvalues, cell_cache)
@@ -127,12 +133,7 @@ function update_stiffness!(fea::FEA{nvar}, x::AbstractVector) where {nvar}
             xe = @view x[nvar*(e-1)+1:nvar*e]
 
             # update Ke and obtain ∂Ke∂x via automatic differentiation
-            ForwardDiff.jacobian!(
-                jac,
-                (Ke, xe) -> element_stiffness!(Ke, xe, cellvalues, fea.stiff_builder),
-                Ke, xe, cfg,
-                Val{false}() # disable tag checking because we are rebuilding the anonymous function
-            )
+            ForwardDiff.jacobian!(jac, element_fun, Ke, xe, cfg)
             for var_idx = 1:nvar
                 @views ∂Ke∂x[nvar*(e-1)+var_idx] = reshape(jac[:, var_idx], n_basefuncs, n_basefuncs)
             end
